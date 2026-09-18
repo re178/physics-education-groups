@@ -37,7 +37,6 @@
 
 <main class="container main-content">
 
-  <!-- Global alert region -->
   <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <!-- ============================================================ -->
@@ -46,15 +45,13 @@
   <section id="view-login" class="view" aria-labelledby="admin-login-title">
     <div class="hero hero-compact">
       <h1 id="admin-login-title">Administrator Login</h1>
-      <p class="hero-sub">
-        Restricted area. Authorized personnel only.
-      </p>
+      <p class="hero-sub">Restricted area. Authorized personnel only.</p>
     </div>
 
     <section class="card card-narrow">
       <div class="card-head">
         <h2>Sign in</h2>
-        <p class="muted">Credentials are never sent to the browser.</p>
+        <p class="muted">Credentials are verified on the server.</p>
       </div>
 
       <form id="admin-login-form" class="form" novalidate autocomplete="on">
@@ -379,15 +376,5 @@
 </footer>
 
 <script src="/app.js" defer></script>
-<script defer>
-  document.addEventListener('DOMContentLoaded', function () {
-    var y = document.getElementById('footer-year');
-    if (y) y.textContent = String(new Date().getFullYear());
-    if (window.PEG && typeof window.PEG.initAdminPage === 'function') {
-      window.PEG.initAdminPage();
-    }
-  });
-</script>
-
 </body>
 </html>
