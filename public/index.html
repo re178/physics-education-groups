@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b3d91" />
+<meta name="description" content="Physics Education Groups — register into your Physics Education group. Maximum 10 members per group." />
+<title>PHYSICS EDUCATION GROUPS — Register</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%9B%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body class="page page-register">
+
+<!-- ============================================================ -->
+<!-- HEADER                                                       -->
+<!-- ============================================================ -->
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">⚛</span>
+      <span class="brand-text">
+        <strong>PHYSICS EDUCATION GROUPS</strong>
+        <small>Student Group Registration</small>
+      </span>
+    </a>
+    <nav class="header-nav" aria-label="Primary">
+      <a class="nav-link" href="/member-login">Member Login</a>
+      <a class="nav-link" href="/admin-login">Admin Login</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ============================================================ -->
+<!-- MAIN                                                         -->
+<!-- ============================================================ -->
+<main class="container main-content">
+
+  <!-- Hero -->
+  <section class="hero">
+    <h1>Join a Physics Education Group</h1>
+    <p class="hero-sub">
+      Register below to be added to your group. Each group holds a
+      maximum of <strong>10 members</strong>. The first member of a
+      new group automatically becomes the <strong>Group Leader</strong>.
+    </p>
+  </section>
+
+  <!-- Alert region (success / error / info) -->
+  <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Registration card -->
+  <section class="card" aria-labelledby="reg-title">
+    <div class="card-head">
+      <h2 id="reg-title">Student Registration</h2>
+      <p class="muted">All fields are required.</p>
+    </div>
+
+    <form id="register-form" class="form" novalidate autocomplete="on">
+      <!-- Registration Number -->
+      <div class="field">
+        <label for="regNo">Registration Number <span class="req" aria-hidden="true">*</span></label>
+        <input
+          id="regNo"
+          name="regNo"
+          type="text"
+          inputmode="text"
+          autocomplete="off"
+          spellcheck="false"
+          autocapitalize="characters"
+          maxlength="40"
+          minlength="3"
+          placeholder="e.g. REG12345"
+          required
+          aria-describedby="regNo-help"
+        />
+        <p id="regNo-help" class="help">
+          Must be unique across the entire system.
+        </p>
+        <p class="field-error" data-error-for="regNo" hidden></p>
+      </div>
+
+      <!-- Full Name -->
+      <div class="field">
+        <label for="name">Full Name <span class="req" aria-hidden="true">*</span></label>
+        <input
+          id="name"
+          name="name"
+          type="text"
+          autocomplete="name"
+          maxlength="120"
+          minlength="2"
+          placeholder="e.g. Jane Wanjiku Doe"
+          required
+        />
+        <p class="field-error" data-error-for="name" hidden></p>
+      </div>
+
+      <!-- Phone -->
+      <div class="field">
+        <label for="phone">Phone Number <span class="req" aria-hidden="true">*</span></label>
+        <input
+          id="phone"
+          name="phone"
+          type="tel"
+          inputmode="tel"
+          autocomplete="tel"
+          maxlength="20"
+          placeholder="e.g. 0712345678"
+          required
+          aria-describedby="phone-help"
+        />
+        <p id="phone-help" class="help">
+          Kenyan numbers: 07…, 01…, 2547…, 2541…, or +2547….
+        </p>
+        <p class="field-error" data-error-for="phone" hidden></p>
+      </div>
+
+      <!-- Group Name -->
+      <div class="field">
+        <label for="groupName">Group Name <span class="req" aria-hidden="true">*</span></label>
+        <input
+          id="groupName"
+          name="groupName"
+          type="text"
+          autocomplete="off"
+          maxlength="80"
+          placeholder="e.g. Physics Group A"
+          required
+          aria-describedby="group-help"
+        />
+        <p id="group-help" class="help">
+          Type a new name to create a group, or an existing name to join one.
+          Capitalization and spaces are ignored when matching groups.
+        </p>
+        <p class="field-error" data-error-for="groupName" hidden></p>
+      </div>
+
+      <!-- Hidden device metadata (populated by app.js) -->
+      <input type="hidden" id="deviceId" name="deviceId" value="" />
+      <input type="hidden" id="deviceMetadata" name="deviceMetadata" value="" />
+
+      <!-- Submit -->
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="submit-btn">
+          <span class="btn-label">SUBMIT REGISTRATION</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+        <button type="reset" class="btn btn-ghost" id="reset-btn">Clear</button>
+      </div>
+
+      <p class="muted small form-footnote">
+        By registering you agree to have your Registration Number, Full Name,
+        Phone Number, and Group Name stored by the Physics Education Groups
+        system for group management purposes. A device identifier is also
+        recorded to prevent duplicate submissions.
+      </p>
+    </form>
+  </section>
+
+  <!-- Success card (hidden until success) -->
+  <section id="success-card" class="card card-success" hidden aria-labelledby="success-title">
+    <div class="card-head">
+      <h2 id="success-title">Registration successful</h2>
+    </div>
+    <div class="success-body">
+      <p id="success-message" class="success-message"></p>
+      <dl class="kv" id="success-details"></dl>
+      <div class="form-actions">
+        <a class="btn btn-primary" id="success-login-link" href="/member-login">
+          Go to Member Login
+        </a>
+        <button type="button" class="btn btn-ghost" id="success-register-another">
+          Register another (different device)
+        </button>
+      </div>
+      <p class="muted small">
+        Note: the same device cannot submit two registrations. If you need to
+        register another student, use a different device or contact the
+        Administrator.
+      </p>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="card card-info" aria-labelledby="how-title">
+    <div class="card-head">
+      <h2 id="how-title">How it works</h2>
+    </div>
+    <ol class="steps">
+      <li>
+        <strong>Enter your details.</strong> Your Registration Number is your
+        unique identifier — it cannot be reused across groups.
+      </li>
+      <li>
+        <strong>Group matching.</strong> Group names are matched
+        case-insensitively and whitespace-insensitively, so
+        <em>“Group A”</em>, <em>“group a”</em>, and <em>“ GROUP A ”</em>
+        are the same group.
+      </li>
+      <li>
+        <strong>Group Leader.</strong> The first member to register in a new
+        group automatically becomes the Group Leader.
+      </li>
+      <li>
+        <strong>Capacity.</strong> Each group holds at most 10 members. If
+        your chosen group is full, you will be asked to pick another group or
+        contact the Administrator.
+      </li>
+      <li>
+        <strong>Login later.</strong> After registering, log in with your
+        Group Name (username) and Registration Number (password) to view
+        your group.
+      </li>
+    </ol>
+  </section>
+
+</main>
+
+<!-- ============================================================ -->
+<!-- FOOTER                                                       -->
+<!-- ============================================================ -->
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <p>© <span id="footer-year"></span> Physics Education Groups. All rights reserved.</p>
+    <p class="muted small">Built with Node.js, Express, MongoDB, and Vanilla JS.</p>
+  </div>
+</footer>
+
+<!-- ============================================================ -->
+<!-- SCRIPTS                                                      -->
+<!-- ============================================================ -->
+<script src="/app.js" defer></script>
+<script defer>
+  // Footer year (tiny inline helper; main logic lives in app.js).
+  document.addEventListener('DOMContentLoaded', function () {
+    var el = document.getElementById('footer-year');
+    if (el) el.textContent = String(new Date().getFullYear());
+  });
+</script>
+
+</body>
+</html>
