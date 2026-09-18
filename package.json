@@ -1,0 +1,34 @@
+{
+  "name": "physics-education-groups",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Physics Education Groups — student group registration and management system.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "physics",
+    "education",
+    "groups",
+    "express",
+    "mongodb",
+    "mongoose",
+    "render"
+  ],
+  "author": "Physics Education Groups",
+  "license": "MIT",
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "mongoose": "^8.5.1"
+  }
+}
