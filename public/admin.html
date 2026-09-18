@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b3d91" />
+<meta name="description" content="Physics Education Groups — administrator portal." />
+<meta name="robots" content="noindex,nofollow" />
+<title>PHYSICS EDUCATION GROUPS — Admin</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%9B%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body class="page page-admin">
+
+<!-- ============================================================ -->
+<!-- HEADER                                                       -->
+<!-- ============================================================ -->
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">⚛</span>
+      <span class="brand-text">
+        <strong>PHYSICS EDUCATION GROUPS</strong>
+        <small>Administrator Portal</small>
+      </span>
+    </a>
+    <nav class="header-nav" aria-label="Primary">
+      <span class="live-indicator" id="live-indicator" hidden aria-hidden="true">
+        <span class="live-dot"></span>
+        <span class="live-text">Live</span>
+      </span>
+      <a class="nav-link" href="/" target="_blank" rel="noopener">Public Site</a>
+      <button type="button" class="nav-link btn-link" id="admin-logout-btn" hidden>Logout</button>
+    </nav>
+  </div>
+</header>
+
+<main class="container main-content">
+
+  <!-- Global alert region -->
+  <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- ============================================================ -->
+  <!-- VIEW: LOGIN                                                  -->
+  <!-- ============================================================ -->
+  <section id="view-login" class="view" aria-labelledby="admin-login-title">
+    <div class="hero hero-compact">
+      <h1 id="admin-login-title">Administrator Login</h1>
+      <p class="hero-sub">
+        Restricted area. Authorized personnel only.
+      </p>
+    </div>
+
+    <section class="card card-narrow">
+      <div class="card-head">
+        <h2>Sign in</h2>
+        <p class="muted">Credentials are never sent to the browser.</p>
+      </div>
+
+      <form id="admin-login-form" class="form" novalidate autocomplete="on">
+        <div class="field">
+          <label for="adminUsername">Username <span class="req" aria-hidden="true">*</span></label>
+          <input
+            id="adminUsername"
+            name="username"
+            type="text"
+            autocomplete="username"
+            autocapitalize="none"
+            spellcheck="false"
+            maxlength="60"
+            placeholder="administrator123"
+            required
+          />
+          <p class="field-error" data-error-for="adminUsername" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="adminPassword">Password <span class="req" aria-hidden="true">*</span></label>
+          <div class="input-with-toggle">
+            <input
+              id="adminPassword"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              spellcheck="false"
+              maxlength="200"
+              placeholder="Enter your password"
+              required
+            />
+            <button
+              type="button"
+              class="toggle-visibility"
+              data-toggle-for="adminPassword"
+              aria-label="Show or hide password"
+              aria-pressed="false"
+            >Show</button>
+          </div>
+          <p class="field-error" data-error-for="adminPassword" hidden></p>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="admin-login-btn">
+            <span class="btn-label">LOGIN</span>
+            <span class="btn-spinner" aria-hidden="true"></span>
+          </button>
+          <a class="btn btn-ghost" href="/">Back to Public Site</a>
+        </div>
+      </form>
+    </section>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- VIEW: DASHBOARD                                              -->
+  <!-- ============================================================ -->
+  <section id="view-dashboard" class="view" hidden aria-labelledby="admin-dash-title">
+    <div class="hero hero-compact">
+      <h1 id="admin-dash-title">Dashboard</h1>
+      <p class="hero-sub">
+        Live overview of all groups and registrations. New registrations
+        appear automatically.
+      </p>
+    </div>
+
+    <!-- Stat tiles -->
+    <section class="stat-grid" aria-label="Dashboard totals">
+      <div class="stat">
+        <span class="stat-label">Total Members</span>
+        <span class="stat-value" id="stat-total-members">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Total Groups</span>
+        <span class="stat-value" id="stat-total-groups">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Total Group Leaders</span>
+        <span class="stat-value" id="stat-total-leaders">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Capacity Used</span>
+        <span class="stat-value" id="stat-capacity-pct">0%</span>
+        <span class="stat-sub" id="stat-capacity-sub">0 / 0 slots</span>
+      </div>
+    </section>
+
+    <!-- Toolbar -->
+    <section class="toolbar">
+      <div class="toolbar-left">
+        <button type="button" class="btn btn-primary" id="btn-create-group">
+          <span class="btn-label">+ New Group</span>
+        </button>
+        <button type="button" class="btn btn-ghost" id="btn-refresh-dashboard">
+          <span class="btn-label">Refresh</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="toolbar-right">
+        <a class="btn btn-secondary" href="/api/admin/export" id="btn-export-csv">
+          ⬇ Export CSV
+        </a>
+      </div>
+    </section>
+
+    <!-- Recent registrations -->
+    <section class="card" aria-labelledby="recent-title">
+      <div class="card-head">
+        <h2 id="recent-title">Recent Registrations</h2>
+        <p class="muted">Latest 10 members across all groups.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="recent-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Group</th>
+              <th scope="col">REG NO</th>
+              <th scope="col">Name</th>
+              <th scope="col">Phone</th>
+              <th scope="col">Role</th>
+            </tr>
+          </thead>
+          <tbody id="recent-table-body">
+            <tr><td colspan="6" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Groups list -->
+    <section class="card" aria-labelledby="groups-title">
+      <div class="card-head">
+        <h2 id="groups-title">All Groups</h2>
+        <p class="muted">Click a group to view, add, edit, or remove members.</p>
+      </div>
+      <div id="groups-list" class="groups-grid" aria-live="polite">
+        <p class="muted">Loading groups…</p>
+      </div>
+    </section>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- VIEW: GROUP DETAIL                                           -->
+  <!-- ============================================================ -->
+  <section id="view-group" class="view" hidden aria-labelledby="group-title">
+    <div class="breadcrumb">
+      <button type="button" class="btn-link" id="btn-back-dashboard">← Back to Dashboard</button>
+    </div>
+
+    <div class="hero hero-compact">
+      <h1 id="group-title">Group</h1>
+      <p class="hero-sub" id="group-sub">Loading…</p>
+    </div>
+
+    <section class="stat-grid" aria-label="Group summary">
+      <div class="stat">
+        <span class="stat-label">Members</span>
+        <span class="stat-value" id="group-member-count">0</span>
+        <span class="stat-sub">of <span id="group-capacity">10</span></span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Leader</span>
+        <span class="stat-value" id="group-leader-name">—</span>
+        <span class="stat-sub" id="group-leader-regno">—</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Created</span>
+        <span class="stat-value" id="group-created">—</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Status</span>
+        <span class="stat-value" id="group-status">—</span>
+      </div>
+    </section>
+
+    <section class="toolbar">
+      <div class="toolbar-left">
+        <button type="button" class="btn btn-primary" id="btn-add-member">+ Add Member</button>
+        <button type="button" class="btn btn-ghost" id="btn-rename-group">Rename Group</button>
+      </div>
+      <div class="toolbar-right">
+        <button type="button" class="btn btn-danger-outline" id="btn-delete-group">
+          Delete Group
+        </button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="group-members-title">
+      <div class="card-head">
+        <h2 id="group-members-title">Members</h2>
+        <p class="muted">Sorted: leader first, then by registration date.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="group-members-table">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">REG NO</th>
+              <th scope="col">NAME</th>
+              <th scope="col">PHONE NUMBER</th>
+              <th scope="col">ROLE</th>
+              <th scope="col">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody id="group-members-body">
+            <tr><td colspan="6" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+</main>
+
+<!-- ============================================================ -->
+<!-- MODAL: CREATE / EDIT MEMBER                                  -->
+<!-- ============================================================ -->
+<div class="modal-backdrop" id="modal-member" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-member-title">
+    <div class="modal-head">
+      <h2 id="modal-member-title">Member</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </div>
+    <form id="member-form" class="form" novalidate>
+      <input type="hidden" id="member-edit-id" value="" />
+
+      <div class="field">
+        <label for="member-regNo">Registration Number <span class="req">*</span></label>
+        <input id="member-regNo" name="regNo" type="text" maxlength="40" required autocapitalize="characters" autocomplete="off" />
+        <p class="field-error" data-error-for="member-regNo" hidden></p>
+      </div>
+
+      <div class="field">
+        <label for="member-name">Full Name <span class="req">*</span></label>
+        <input id="member-name" name="name" type="text" maxlength="120" required autocomplete="off" />
+        <p class="field-error" data-error-for="member-name" hidden></p>
+      </div>
+
+      <div class="field">
+        <label for="member-phone">Phone Number <span class="req">*</span></label>
+        <input id="member-phone" name="phone" type="tel" maxlength="20" required autocomplete="off" />
+        <p class="field-error" data-error-for="member-phone" hidden></p>
+      </div>
+
+      <div class="field">
+        <label for="member-group">Group <span class="req">*</span></label>
+        <select id="member-group" name="groupId" required></select>
+        <p class="field-error" data-error-for="member-group" hidden></p>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="member-submit-btn">
+          <span class="btn-label">Save</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: CREATE / RENAME GROUP                                 -->
+<!-- ============================================================ -->
+<div class="modal-backdrop" id="modal-group" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-group-title">
+    <div class="modal-head">
+      <h2 id="modal-group-title">Group</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </div>
+    <form id="group-form" class="form" novalidate>
+      <input type="hidden" id="group-edit-id" value="" />
+
+      <div class="field">
+        <label for="group-name-input">Group Name <span class="req">*</span></label>
+        <input id="group-name-input" name="name" type="text" maxlength="80" required autocomplete="off" />
+        <p class="field-error" data-error-for="group-name-input" hidden></p>
+        <p class="help">
+          Capitalization and extra spaces are ignored when matching against
+          existing groups.
+        </p>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="group-submit-btn">
+          <span class="btn-label">Save</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: CONFIRM                                               -->
+<!-- ============================================================ -->
+<div class="modal-backdrop" id="modal-confirm" hidden>
+  <div class="modal modal-small" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-head">
+      <h2 id="confirm-title">Confirm</h2>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-message">Are you sure?</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="confirm-cancel">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirm-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- FOOTER                                                       -->
+<!-- ============================================================ -->
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <p>© <span id="footer-year"></span> Physics Education Groups. Administrator Portal.</p>
+    <p class="muted small">Restricted access.</p>
+  </div>
+</footer>
+
+<script src="/app.js" defer></script>
+<script defer>
+  document.addEventListener('DOMContentLoaded', function () {
+    var y = document.getElementById('footer-year');
+    if (y) y.textContent = String(new Date().getFullYear());
+    if (window.PEG && typeof window.PEG.initAdminPage === 'function') {
+      window.PEG.initAdminPage();
+    }
+  });
+</script>
+
+</body>
+</html>
