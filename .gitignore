@@ -1,0 +1,64 @@
+# ==========================================================
+# Physics Education Groups — Git ignore rules
+# ==========================================================
+
+# ---- Dependencies ----
+node_modules/
+jspm_packages/
+bower_components/
+
+# ---- Environment files (NEVER commit real secrets) ----
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.env.*.local
+!.env.example
+
+# ---- Logs ----
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---- Runtime data ----
+pids/
+*.pid
+*.seed
+*.pid.lock
+coverage/
+.nyc_output/
+dist/
+build/
+out/
+
+# ---- Editor / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+# ---- OS junk ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ---- Misc ----
+.cache/
+.temp/
+.tmp/
+.npm/
+.node_repl_history
+*.tgz
