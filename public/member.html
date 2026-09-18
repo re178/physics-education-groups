@@ -12,9 +12,6 @@
 </head>
 <body class="page page-member">
 
-<!-- ============================================================ -->
-<!-- HEADER                                                       -->
-<!-- ============================================================ -->
 <header class="site-header">
   <div class="container header-inner">
     <a class="brand" href="/">
@@ -34,7 +31,6 @@
 
 <main class="container main-content">
 
-  <!-- Global alert region -->
   <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <!-- ============================================================ -->
@@ -52,7 +48,7 @@
     <section class="card card-narrow" aria-labelledby="login-form-title">
       <div class="card-head">
         <h2 id="login-form-title">Sign in</h2>
-        <p class="muted">Both fields are case-insensitive for group name.</p>
+        <p class="muted">Group name is case-insensitive.</p>
       </div>
 
       <form id="member-login-form" class="form" novalidate autocomplete="on">
@@ -148,7 +144,7 @@
       </div>
     </section>
 
-    <!-- Progress bar for capacity -->
+    <!-- Capacity bar -->
     <section class="card card-flat">
       <div class="capacity">
         <div class="capacity-bar" aria-hidden="true">
@@ -200,9 +196,6 @@
 
 </main>
 
-<!-- ============================================================ -->
-<!-- FOOTER                                                       -->
-<!-- ============================================================ -->
 <footer class="site-footer">
   <div class="container footer-inner">
     <p>© <span id="footer-year"></span> Physics Education Groups. All rights reserved.</p>
@@ -211,15 +204,5 @@
 </footer>
 
 <script src="/app.js" defer></script>
-<script defer>
-  document.addEventListener('DOMContentLoaded', function () {
-    var y = document.getElementById('footer-year');
-    if (y) y.textContent = String(new Date().getFullYear());
-    if (window.PEG && typeof window.PEG.initMemberPage === 'function') {
-      window.PEG.initMemberPage();
-    }
-  });
-</script>
-
 </body>
 </html>
