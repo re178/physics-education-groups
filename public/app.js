@@ -11,6 +11,9 @@
  *   - Modal helpers, alerts, confirmations, CSV export
  *
  * No framework. No build step. Pure browser JavaScript.
+ *
+ * NOTE: Auto-detects which page it's on. No inline scripts are
+ * required in the HTML files (they are blocked by Helmet's CSP).
  * ============================================================ */
 'use strict';
 
@@ -206,7 +209,6 @@
         }, timeout);
       }
 
-      // Auto-scroll into view for mobile.
       try { node.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
 
       return node;
@@ -217,12 +219,18 @@
       if (region) region.innerHTML = '';
     }
 
+    function isShowing() {
+      const region = document.getElementById('alert-region');
+      return region ? region.children.length > 0 : false;
+    }
+
     return {
       success: (m, o) => render('success', m, o),
       error: (m, o) => render('error', m, o),
       warning: (m, o) => render('warning', m, o),
       info: (m, o) => render('info', m, o),
       clear,
+      isShowing,
     };
   })();
 
@@ -235,7 +243,6 @@
       if (!node) return;
       node.hidden = false;
       document.body.style.overflow = 'hidden';
-      // Focus first focusable input.
       const focusable = node.querySelector('input, select, textarea, button');
       if (focusable) setTimeout(() => { try { focusable.focus(); } catch (_) {} }, 30);
     }
@@ -244,7 +251,6 @@
       const node = document.getElementById(id);
       if (!node) return;
       node.hidden = true;
-      // Only restore scroll if no other modals are open.
       const anyOpen = $$('.modal-backdrop').some((m) => !m.hidden);
       if (!anyOpen) document.body.style.overflow = '';
     }
@@ -254,7 +260,6 @@
       document.body.style.overflow = '';
     }
 
-    // Wire generic close buttons / backdrop clicks once.
     document.addEventListener('click', (e) => {
       const closeBtn = e.target.closest('[data-close-modal]');
       if (closeBtn) {
@@ -270,7 +275,6 @@
       if (e.key === 'Escape') closeAll();
     });
 
-    // Confirm helper — returns a Promise<boolean>.
     let pendingConfirmResolve = null;
     function confirm(message, opts = {}) {
       const { title = 'Confirm', okText = 'Confirm', cancelText = 'Cancel' } = opts;
@@ -284,7 +288,6 @@
       okBtn.textContent = okText;
       cancelBtn.textContent = cancelText;
 
-      // Reset previous handlers.
       const newOk = okBtn.cloneNode(true);
       const newCancel = cancelBtn.cloneNode(true);
       okBtn.parentNode.replaceChild(newOk, okBtn);
@@ -339,10 +342,6 @@
     return csrfFetchPromise;
   }
 
-  /**
-   * api(path, options) → { ok, status, data }
-   * Automatically handles CSRF for non-GET requests.
-   */
   async function api(path, options = {}) {
     const method = (options.method || 'GET').toUpperCase();
     const isMutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
@@ -394,7 +393,6 @@
     }
 
     if (res.status === 403 && data && data.code === 'CSRF_INVALID') {
-      // Refresh CSRF once and retry.
       await getCsrfToken(true);
       const token = csrfTokenCache;
       if (token) headers[CSRF_HEADER] = token;
@@ -479,15 +477,12 @@
     const form = document.getElementById('register-form');
     if (!form) return;
 
-    // Pre-populate device fields.
     const deviceIdInput = document.getElementById('deviceId');
     const deviceMetaInput = document.getElementById('deviceMetadata');
     if (deviceIdInput) deviceIdInput.value = Device.getId();
     if (deviceMetaInput) deviceMetaInput.value = JSON.stringify(Device.getMetadata());
 
-    // Populate on submit too (in case the page was left open and screen resized).
     const submitBtn = document.getElementById('submit-btn');
-    const resetBtn = document.getElementById('reset-btn');
     const successCard = document.getElementById('success-card');
 
     form.addEventListener('reset', () => {
@@ -506,7 +501,6 @@
       const phone = ($('#phone') || {}).value || '';
       const groupName = ($('#groupName') || {}).value || '';
 
-      // Client-side validation (server re-validates everything).
       let hasError = false;
       if (!regNo.trim()) { setFieldError('regNo', 'Registration number is required.'); hasError = true; }
       else if (regNo.trim().length < 3) { setFieldError('regNo', 'Registration number is too short.'); hasError = true; }
@@ -546,7 +540,6 @@
       const message = (data && data.message) || 'We could not complete your registration. Please contact the Administrator.';
       const code = (data && data.code) || 'SERVER_ERROR';
 
-      // Map codes to specific field errors for nicer UX.
       if (code === 'INVALID_REQNO') setFieldError('regNo', message);
       else if (code === 'INVALID_NAME') setFieldError('name', message);
       else if (code === 'INVALID_PHONE') setFieldError('phone', message);
@@ -556,8 +549,12 @@
       else if (code === 'DEVICE_USED') Alert.warning(message, { title: 'Device already used' });
       else if (code === 'RATE_LIMIT') Alert.warning(message, { title: 'Too many attempts' });
 
-      if (code === 'DUPLICATE_REGNO' || code === 'GROUP_FULL' || code === 'DEVICE_USED') {
-        Alert.warning(message, { title: code === 'GROUP_FULL' ? 'Group full' : code === 'DEVICE_USED' ? 'Device already used' : 'Duplicate registration' });
+      if (code === 'DUPLICATE_REGNO') {
+        Alert.warning(message, { title: 'Duplicate registration' });
+      } else if (code === 'GROUP_FULL') {
+        Alert.warning(message, { title: 'Group full' });
+      } else if (code === 'DEVICE_USED') {
+        Alert.warning(message, { title: 'Device already used' });
       } else if (code === 'INVALID_REQNO' || code === 'INVALID_NAME' || code === 'INVALID_PHONE' || code === 'INVALID_GROUP') {
         Alert.error(message, { title: 'Check your input' });
       } else if (!Alert.isShowing()) {
@@ -597,7 +594,6 @@
       }
       if (anotherBtn) {
         anotherBtn.addEventListener('click', () => {
-          // We can't reset the device lock, so send to top with a note.
           Alert.info(
             'To register another student, please use a different device or browser.',
             { title: 'One device per registration' }
@@ -609,12 +605,6 @@
       try { successCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
     }
   }
-
-  // Attach `Alert.isShowing` for the registration handler above.
-  Alert.isShowing = function () {
-    const region = document.getElementById('alert-region');
-    return region ? region.children.length > 0 : false;
-  };
 
   /* ============================================================
    * 10. MEMBER PAGE (member.html)
@@ -651,7 +641,6 @@
       showLogin();
     }
 
-    // Login form submit.
     if (loginForm) {
       loginForm.addEventListener('submit', withLoading(loginBtn, async (e) => {
         e.preventDefault();
@@ -688,13 +677,11 @@
       }));
     }
 
-    // Logout handlers.
     async function doLogout() {
       const { ok } = await api('/api/member/logout', { method: 'POST' });
       if (ok) {
         Alert.info('You have been logged out.', { timeout: 2500 });
         showLogin();
-        // Clear dashboard content to avoid stale data.
         const tbody = document.getElementById('member-table-body');
         if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="table-empty">Loading…</td></tr>';
       } else {
@@ -705,7 +692,6 @@
     if (logoutBtn) logoutBtn.addEventListener('click', doLogout);
     if (dashLogoutBtn) dashLogoutBtn.addEventListener('click', doLogout);
 
-    // Refresh button.
     if (refreshBtn) {
       refreshBtn.addEventListener('click', withLoading(refreshBtn, async () => {
         await loadMemberGroup();
@@ -728,21 +714,17 @@
       const members = data.members || [];
       const viewer = data.viewer || {};
 
-      // Header name
       const nameEl = document.getElementById('dash-member-name');
       if (nameEl) nameEl.textContent = viewer.name || 'Member';
 
-      // Group name
       const gNameEl = document.getElementById('dash-group-name');
       if (gNameEl) gNameEl.textContent = group.name || '—';
 
-      // Leader
       const leaderName = document.getElementById('dash-leader-name');
       const leaderReg = document.getElementById('dash-leader-regno');
       if (leaderName) leaderName.textContent = group.leaderName || '—';
       if (leaderReg) leaderReg.textContent = group.leaderRegNo ? `REG: ${group.leaderRegNo}` : '';
 
-      // Member count
       const countEl = document.getElementById('dash-member-count');
       const capEl = document.getElementById('dash-capacity');
       const capacity = group.capacity || 10;
@@ -750,11 +732,9 @@
       if (countEl) countEl.textContent = String(memberCount);
       if (capEl) capEl.textContent = String(capacity);
 
-      // Your role
       const roleEl = document.getElementById('dash-your-role');
       if (roleEl) roleEl.textContent = viewer.isLeader ? 'GROUP LEADER' : 'MEMBER';
 
-      // Capacity bar
       const fill = document.getElementById('dash-capacity-fill');
       const text = document.getElementById('dash-capacity-text');
       const pct = capacity > 0 ? Math.min(100, Math.round((memberCount / capacity) * 100)) : 0;
@@ -764,7 +744,6 @@
       }
       if (text) text.textContent = `${memberCount} / ${capacity} members`;
 
-      // Member table
       const tbody = document.getElementById('member-table-body');
       if (!tbody) return;
       tbody.innerHTML = '';
@@ -807,7 +786,6 @@
     const logoutBtn = document.getElementById('admin-logout-btn');
     const liveIndicator = document.getElementById('live-indicator');
 
-    // ---------- View switching ----------
     function showLogin() {
       loginView.hidden = false;
       dashView.hidden = true;
@@ -892,7 +870,7 @@
       });
     }
 
-    // ---------- Dashboard: load & render ----------
+    // ---------- Dashboard ----------
     async function loadDashboard() {
       const { ok, data } = await api('/api/admin/dashboard');
       if (!ok || !data || !data.success) {
@@ -908,7 +886,8 @@
       const groups = data.groups || [];
       const recent = data.recent || [];
 
-      // Stat tiles
+      window.__peg_lastGroups = groups;
+
       setText('stat-total-members', totals.totalMembers != null ? totals.totalMembers : 0);
       setText('stat-total-groups', totals.totalGroups != null ? totals.totalGroups : 0);
       setText('stat-total-leaders', totals.totalLeaders != null ? totals.totalLeaders : 0);
@@ -919,7 +898,6 @@
       setText('stat-capacity-pct', pct + '%');
       setText('stat-capacity-sub', `${usedSlots} / ${totalSlots} slots`);
 
-      // Recent registrations
       const recentBody = document.getElementById('recent-table-body');
       if (recentBody) {
         recentBody.innerHTML = '';
@@ -946,7 +924,6 @@
         }
       }
 
-      // Groups grid
       const grid = document.getElementById('groups-list');
       if (grid) {
         grid.innerHTML = '';
@@ -960,7 +937,7 @@
 
     function buildGroupCard(g) {
       const isFull = g.memberCount >= (g.capacity || 10);
-      const card = el('button', {
+      return el('button', {
         type: 'button',
         class: 'group-card',
         'data-group-id': g.id,
@@ -982,7 +959,6 @@
           g.leaderRegNo ? ' (' + g.leaderRegNo + ')' : '',
         ]),
       ]);
-      return card;
     }
 
     function setText(id, value) {
@@ -1061,7 +1037,6 @@
           Modal.close('modal-group');
           Alert.success(data.message || 'Saved.', { timeout: 2200 });
           await loadDashboard();
-          // If we're on the group view of the renamed group, refresh it.
           if (id && currentGroupId === id) await openGroup(id);
         } else {
           const msg = (data && data.message) || 'Could not save group.';
@@ -1151,7 +1126,6 @@
       });
     }
 
-    // Back to dashboard
     const backBtn = document.getElementById('btn-back-dashboard');
     if (backBtn) {
       backBtn.addEventListener('click', async () => {
@@ -1161,7 +1135,6 @@
       });
     }
 
-    // Rename group (from group view)
     const renameBtn = document.getElementById('btn-rename-group');
     if (renameBtn) {
       renameBtn.addEventListener('click', () => {
@@ -1170,7 +1143,6 @@
       });
     }
 
-    // Delete group
     const deleteGroupBtn = document.getElementById('btn-delete-group');
     if (deleteGroupBtn) {
       deleteGroupBtn.addEventListener('click', async () => {
@@ -1201,7 +1173,6 @@
       });
     }
 
-    // Add member
     const addMemberBtn = document.getElementById('btn-add-member');
     if (addMemberBtn) {
       addMemberBtn.addEventListener('click', () => {
@@ -1221,14 +1192,9 @@
       const phoneInput = document.getElementById('member-phone');
       const groupSelect = document.getElementById('member-group');
 
-      // Populate group dropdown from current dashboard data.
       if (groupSelect) {
         groupSelect.innerHTML = '';
-        const groups = (currentGroupData && currentGroupData.group)
-          ? [currentGroupData.group]
-          : [];
-        // We need the full group list for moves. Fall back to a dashboard fetch if needed.
-        const list = window.__peg_lastGroups || groups;
+        const list = window.__peg_lastGroups || (currentGroupData && currentGroupData.group ? [currentGroupData.group] : []);
         for (const g of list) {
           const opt = el('option', { value: g.id, text: `${g.name} (${g.memberCount}/${g.capacity || 10})` });
           if (g.id === presetGroupId) opt.selected = true;
@@ -1290,7 +1256,6 @@
           const msg = (data && data.message) || 'Could not save member.';
           if (code === 'DUPLICATE_REGNO') setFieldError('member-regNo', 'Already registered.');
           else if (code === 'INVALID_PHONE') setFieldError('member-phone', 'Invalid phone number.');
-          else if (code === 'GROUP_FULL') Alert.warning(msg, { title: 'Group full' });
           Alert.error(msg);
         }
       }));
@@ -1320,14 +1285,11 @@
     const exportLink = document.getElementById('btn-export-csv');
     if (exportLink) {
       exportLink.addEventListener('click', (e) => {
-        // Let the browser download via the anchor href.
-        // No fetch needed; server sets Content-Disposition.
-        // We only prevent double-clicks here.
         e.currentTarget.blur();
       });
     }
 
-    // ---------- SSE for live updates ----------
+    // ---------- SSE ----------
     let sse = null;
     let sseReconnectDelay = 1000;
 
@@ -1343,7 +1305,6 @@
 
         sse.addEventListener('error', () => {
           if (liveIndicator) liveIndicator.hidden = true;
-          // EventSource auto-reconnects; we just back off on repeated failures.
           if (sse && sse.readyState === EventSource.CLOSED) {
             stopSse();
             setTimeout(startSse, sseReconnectDelay);
@@ -1352,7 +1313,6 @@
         });
 
         const refreshAll = () => {
-          // Reload dashboard and group detail (if on group view).
           if (!dashView.hidden) loadDashboard();
           if (!groupView.hidden && currentGroupId) openGroup(currentGroupId);
         };
@@ -1388,35 +1348,51 @@
       if (liveIndicator) liveIndicator.hidden = true;
     }
 
-    // Clean up SSE when leaving.
     window.addEventListener('beforeunload', stopSse);
 
-    // ---------- Deep link: /admin-group?id=xxx ----------
     const params = new URLSearchParams(window.location.search);
     const qsId = params.get('id');
     if (qsId && me.ok && me.data && me.data.success) {
       openGroup(qsId);
     }
 
-    // Expose a hook so the register page (in another tab) isn't affected.
     window.__peg_admin = { loadDashboard, openGroup };
   }
 
   /* ============================================================
    * 12. Auto-bootstrap by page
+   * ------------------------------------------------------------
+   * Detects which HTML page we're on by a unique DOM id and
+   * runs the matching initializer. This avoids the need for
+   * inline <script> tags (which Helmet's CSP blocks).
    * ============================================================ */
   function bootstrap() {
     wireVisibilityToggles();
 
-    // Prefetch CSRF token on any page.
+    // Prefetch CSRF token on every page.
     getCsrfToken().catch(() => {});
 
-    // Detect page by presence of distinctive DOM nodes.
+    // Set footer year if a #footer-year element exists.
+    const yearEl = document.getElementById('footer-year');
+    if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+
+    // Page detection — each page has exactly one of these forms.
     if (document.getElementById('register-form')) {
       initRegisterPage();
     }
-    // member.html calls window.PEG.initMemberPage() itself.
-    // admin.html calls window.PEG.initAdminPage() itself.
+
+    if (document.getElementById('member-login-form')) {
+      // initMemberPage is async — fire and let it run.
+      initMemberPage().catch((err) => {
+        console.error('[PEG] initMemberPage failed:', err);
+      });
+    }
+
+    if (document.getElementById('admin-login-form')) {
+      initAdminPage().catch((err) => {
+        console.error('[PEG] initAdminPage failed:', err);
+      });
+    }
   }
 
   if (document.readyState === 'loading') {
