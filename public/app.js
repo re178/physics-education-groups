@@ -12,8 +12,9 @@
  *
  * No framework. No build step. Pure browser JavaScript.
  *
- * NOTE: Auto-detects which page it's on. No inline scripts are
- * required in the HTML files (they are blocked by Helmet's CSP).
+ * Auto-detects which page it's on and initializes it. No inline
+ * scripts are required in the HTML files (they are blocked by
+ * Helmet's Content-Security-Policy: scriptSrc 'self').
  * ============================================================ */
 'use strict';
 
@@ -60,13 +61,6 @@
     }
     return null;
   };
-
-  const escapeHtml = (s) => String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 
   const formatDate = (iso) => {
     try {
@@ -116,7 +110,6 @@
         }
         return id;
       } catch (_) {
-        // localStorage unavailable (private mode etc.) — use in-memory only.
         if (!window.__peg_mem_device_id) window.__peg_mem_device_id = uuid();
         return window.__peg_mem_device_id;
       }
@@ -545,9 +538,6 @@
       else if (code === 'INVALID_PHONE') setFieldError('phone', message);
       else if (code === 'INVALID_GROUP') setFieldError('groupName', message);
       else if (code === 'DUPLICATE_REGNO') setFieldError('regNo', 'This registration number is already registered.');
-      else if (code === 'GROUP_FULL') Alert.warning(message, { title: 'Group full' });
-      else if (code === 'DEVICE_USED') Alert.warning(message, { title: 'Device already used' });
-      else if (code === 'RATE_LIMIT') Alert.warning(message, { title: 'Too many attempts' });
 
       if (code === 'DUPLICATE_REGNO') {
         Alert.warning(message, { title: 'Duplicate registration' });
@@ -786,6 +776,79 @@
     const logoutBtn = document.getElementById('admin-logout-btn');
     const liveIndicator = document.getElementById('live-indicator');
 
+    /* ----------------------------------------------------------
+     * STATE — declared FIRST so nothing can reference these
+     * before initialization (fixes the "Cannot access 'sse'
+     * before initialization" TDZ error).
+     * ---------------------------------------------------------- */
+    let sse = null;
+    let sseReconnectDelay = 1000;
+    let currentGroupId = null;
+    let currentGroupData = null;
+
+    /* ----------------------------------------------------------
+     * SSE functions — declared BEFORE showLogin() uses them.
+     * ---------------------------------------------------------- */
+    function startSse() {
+      if (sse) return;
+      try {
+        sse = new EventSource('/api/admin/events', { withCredentials: true });
+
+        sse.addEventListener('open', () => {
+          sseReconnectDelay = 1000;
+          if (liveIndicator) liveIndicator.hidden = false;
+        });
+
+        sse.addEventListener('error', () => {
+          if (liveIndicator) liveIndicator.hidden = true;
+          if (sse && sse.readyState === EventSource.CLOSED) {
+            stopSse();
+            setTimeout(startSse, sseReconnectDelay);
+            sseReconnectDelay = Math.min(sseReconnectDelay * 2, 15000);
+          }
+        });
+
+        const refreshAll = () => {
+          if (!dashView.hidden) loadDashboard();
+          if (!groupView.hidden && currentGroupId) openGroup(currentGroupId);
+        };
+
+        sse.addEventListener('registration', (ev) => {
+          try {
+            const payload = JSON.parse(ev.data);
+            const m = payload.member || {};
+            const g = payload.group || {};
+            Alert.info(
+              `${m.name || 'New member'} (${m.regNo || ''}) registered in "${g.name || ''}".` +
+                (payload.isLeader ? ' Assigned as Group Leader.' : ''),
+              { title: 'New registration', timeout: 6000 }
+            );
+          } catch (_) { /* ignore */ }
+          refreshAll();
+        });
+
+        ['member-added', 'member-updated', 'member-deleted', 'group-created', 'group-updated', 'group-deleted']
+          .forEach((evName) => {
+            sse.addEventListener(evName, () => refreshAll());
+          });
+      } catch (err) {
+        console.warn('SSE init failed:', err);
+      }
+    }
+
+    function stopSse() {
+      if (sse) {
+        try { sse.close(); } catch (_) {}
+        sse = null;
+      }
+      if (liveIndicator) liveIndicator.hidden = true;
+    }
+
+    window.addEventListener('beforeunload', stopSse);
+
+    /* ----------------------------------------------------------
+     * View switching
+     * ---------------------------------------------------------- */
     function showLogin() {
       loginView.hidden = false;
       dashView.hidden = true;
@@ -807,7 +870,9 @@
       if (logoutBtn) logoutBtn.hidden = false;
     }
 
-    // ---------- Session check ----------
+    /* ----------------------------------------------------------
+     * Session check
+     * ---------------------------------------------------------- */
     const me = await api('/api/admin/me');
     if (me.ok && me.data && me.data.success) {
       await loadDashboard();
@@ -817,7 +882,9 @@
       showLogin();
     }
 
-    // ---------- Login ----------
+    /* ----------------------------------------------------------
+     * Login
+     * ---------------------------------------------------------- */
     if (loginForm) {
       loginForm.addEventListener('submit', withLoading(loginBtn, async (e) => {
         e.preventDefault();
@@ -852,7 +919,9 @@
       }));
     }
 
-    // ---------- Logout ----------
+    /* ----------------------------------------------------------
+     * Logout
+     * ---------------------------------------------------------- */
     if (logoutBtn) {
       logoutBtn.addEventListener('click', async () => {
         const confirmed = await Modal.confirm('Log out of the administrator portal?', {
@@ -870,7 +939,9 @@
       });
     }
 
-    // ---------- Dashboard ----------
+    /* ----------------------------------------------------------
+     * Dashboard
+     * ---------------------------------------------------------- */
     async function loadDashboard() {
       const { ok, data } = await api('/api/admin/dashboard');
       if (!ok || !data || !data.success) {
@@ -976,7 +1047,9 @@
       if (grid) grid.innerHTML = '<p class="muted">Loading groups…</p>';
     }
 
-    // ---------- Refresh ----------
+    /* ----------------------------------------------------------
+     * Refresh
+     * ---------------------------------------------------------- */
     const refreshBtn = document.getElementById('btn-refresh-dashboard');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', withLoading(refreshBtn, async () => {
@@ -985,7 +1058,9 @@
       }));
     }
 
-    // ---------- Create group ----------
+    /* ----------------------------------------------------------
+     * Create group
+     * ---------------------------------------------------------- */
     const createGroupBtn = document.getElementById('btn-create-group');
     if (createGroupBtn) {
       createGroupBtn.addEventListener('click', () => openGroupModal(null));
@@ -1048,10 +1123,9 @@
       }));
     }
 
-    // ---------- Group detail ----------
-    let currentGroupId = null;
-    let currentGroupData = null;
-
+    /* ----------------------------------------------------------
+     * Group detail
+     * ---------------------------------------------------------- */
     async function openGroup(groupId) {
       currentGroupId = groupId;
       const { ok, data } = await api(`/api/admin/groups/${encodeURIComponent(groupId)}`);
@@ -1281,7 +1355,9 @@
       }
     }
 
-    // Export CSV — plain link; browser handles the download.
+    /* ----------------------------------------------------------
+     * Export CSV — plain link; browser handles the download.
+     * ---------------------------------------------------------- */
     const exportLink = document.getElementById('btn-export-csv');
     if (exportLink) {
       exportLink.addEventListener('click', (e) => {
@@ -1289,67 +1365,9 @@
       });
     }
 
-    // ---------- SSE ----------
-    let sse = null;
-    let sseReconnectDelay = 1000;
-
-    function startSse() {
-      if (sse) return;
-      try {
-        sse = new EventSource('/api/admin/events', { withCredentials: true });
-
-        sse.addEventListener('open', () => {
-          sseReconnectDelay = 1000;
-          if (liveIndicator) liveIndicator.hidden = false;
-        });
-
-        sse.addEventListener('error', () => {
-          if (liveIndicator) liveIndicator.hidden = true;
-          if (sse && sse.readyState === EventSource.CLOSED) {
-            stopSse();
-            setTimeout(startSse, sseReconnectDelay);
-            sseReconnectDelay = Math.min(sseReconnectDelay * 2, 15000);
-          }
-        });
-
-        const refreshAll = () => {
-          if (!dashView.hidden) loadDashboard();
-          if (!groupView.hidden && currentGroupId) openGroup(currentGroupId);
-        };
-
-        sse.addEventListener('registration', (ev) => {
-          try {
-            const payload = JSON.parse(ev.data);
-            const m = payload.member || {};
-            const g = payload.group || {};
-            Alert.info(
-              `${m.name || 'New member'} (${m.regNo || ''}) registered in "${g.name || ''}".` +
-                (payload.isLeader ? ' Assigned as Group Leader.' : ''),
-              { title: 'New registration', timeout: 6000 }
-            );
-          } catch (_) { /* ignore */ }
-          refreshAll();
-        });
-
-        ['member-added', 'member-updated', 'member-deleted', 'group-created', 'group-updated', 'group-deleted']
-          .forEach((evName) => {
-            sse.addEventListener(evName, () => refreshAll());
-          });
-      } catch (err) {
-        console.warn('SSE init failed:', err);
-      }
-    }
-
-    function stopSse() {
-      if (sse) {
-        try { sse.close(); } catch (_) {}
-        sse = null;
-      }
-      if (liveIndicator) liveIndicator.hidden = true;
-    }
-
-    window.addEventListener('beforeunload', stopSse);
-
+    /* ----------------------------------------------------------
+     * Deep link: /admin-group?id=xxx
+     * ---------------------------------------------------------- */
     const params = new URLSearchParams(window.location.search);
     const qsId = params.get('id');
     if (qsId && me.ok && me.data && me.data.success) {
@@ -1382,7 +1400,6 @@
     }
 
     if (document.getElementById('member-login-form')) {
-      // initMemberPage is async — fire and let it run.
       initMemberPage().catch((err) => {
         console.error('[PEG] initMemberPage failed:', err);
       });
