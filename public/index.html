@@ -11,9 +11,6 @@
 </head>
 <body class="page page-register">
 
-<!-- ============================================================ -->
-<!-- HEADER                                                       -->
-<!-- ============================================================ -->
 <header class="site-header">
   <div class="container header-inner">
     <a class="brand" href="/">
@@ -30,12 +27,8 @@
   </div>
 </header>
 
-<!-- ============================================================ -->
-<!-- MAIN                                                         -->
-<!-- ============================================================ -->
 <main class="container main-content">
 
-  <!-- Hero -->
   <section class="hero">
     <h1>Join a Physics Education Group</h1>
     <p class="hero-sub">
@@ -45,10 +38,8 @@
     </p>
   </section>
 
-  <!-- Alert region (success / error / info) -->
   <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- Registration card -->
   <section class="card" aria-labelledby="reg-title">
     <div class="card-head">
       <h2 id="reg-title">Student Registration</h2>
@@ -56,7 +47,6 @@
     </div>
 
     <form id="register-form" class="form" novalidate autocomplete="on">
-      <!-- Registration Number -->
       <div class="field">
         <label for="regNo">Registration Number <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -79,7 +69,6 @@
         <p class="field-error" data-error-for="regNo" hidden></p>
       </div>
 
-      <!-- Full Name -->
       <div class="field">
         <label for="name">Full Name <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -95,7 +84,6 @@
         <p class="field-error" data-error-for="name" hidden></p>
       </div>
 
-      <!-- Phone -->
       <div class="field">
         <label for="phone">Phone Number <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -115,7 +103,6 @@
         <p class="field-error" data-error-for="phone" hidden></p>
       </div>
 
-      <!-- Group Name -->
       <div class="field">
         <label for="groupName">Group Name <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -135,11 +122,9 @@
         <p class="field-error" data-error-for="groupName" hidden></p>
       </div>
 
-      <!-- Hidden device metadata (populated by app.js) -->
       <input type="hidden" id="deviceId" name="deviceId" value="" />
       <input type="hidden" id="deviceMetadata" name="deviceMetadata" value="" />
 
-      <!-- Submit -->
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" id="submit-btn">
           <span class="btn-label">SUBMIT REGISTRATION</span>
@@ -157,7 +142,6 @@
     </form>
   </section>
 
-  <!-- Success card (hidden until success) -->
   <section id="success-card" class="card card-success" hidden aria-labelledby="success-title">
     <div class="card-head">
       <h2 id="success-title">Registration successful</h2>
@@ -181,7 +165,6 @@
     </div>
   </section>
 
-  <!-- How it works -->
   <section class="card card-info" aria-labelledby="how-title">
     <div class="card-head">
       <h2 id="how-title">How it works</h2>
@@ -216,27 +199,13 @@
 
 </main>
 
-<!-- ============================================================ -->
-<!-- FOOTER                                                       -->
-<!-- ============================================================ -->
 <footer class="site-footer">
   <div class="container footer-inner">
     <p>© <span id="footer-year"></span> Physics Education Groups. All rights reserved.</p>
-    <p class="muted small">Built with Node.js, Express, MongoDB, and Vanilla JS.</p>
+    <p class="muted small">build by physics representatives.</p>
   </div>
 </footer>
 
-<!-- ============================================================ -->
-<!-- SCRIPTS                                                      -->
-<!-- ============================================================ -->
 <script src="/app.js" defer></script>
-<script defer>
-  // Footer year (tiny inline helper; main logic lives in app.js).
-  document.addEventListener('DOMContentLoaded', function () {
-    var el = document.getElementById('footer-year');
-    if (el) el.textContent = String(new Date().getFullYear());
-  });
-</script>
-
 </body>
 </html>
