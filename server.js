@@ -4,25 +4,17 @@
  * ============================================================================
  * PHYSICS EDUCATION GROUPS — Complete Backend (server.js)
  * ============================================================================
- * Version: 1.1.1
+ * Version: 1.2.0
  *
- * Sections:
- *   1. Environment loading + validation
- *   2. Utilities (normalization, validation, hashing)
- *   3. MongoDB / Mongoose connection
- *   4. Mongoose models: Group, Member, Admin, AdminSession
- *   5. Business helpers (leader reconciliation, shapers)
- *   6. Server-Sent Events (live admin dashboard)
- *   7. App + middleware (Helmet, CORS, rate limits, CSRF, auth)
- *   8. Public routes
- *   9. Member routes
- *  10. Admin routes
- *  11. CSV export
- *  11B. PDF export (pdfkit) — fixed page-dimension order
- *  12. SSE endpoint
- *  13. Static files + page routes
- *  14. 404 + error handlers
- *  15. Startup + graceful shutdown
+ * Additions in this version:
+ *   - Settings collection (single-doc key/value store)
+ *   - Registration open/close toggle
+ *   - GET  /api/registration-status          (public)
+ *   - POST /api/admin/registration-toggle    (admin)
+ *   - /api/register guard when submissions are closed
+ *   - PDF colors toned down (same layout, no heavy blue/red/green fills)
+ *
+ * Everything else unchanged from 1.1.1.
  * ============================================================================
  */
 
@@ -577,9 +569,47 @@ const AdminSessionSchema = new mongoose.Schema(
 
 const AdminSession = mongoose.model('AdminSession', AdminSessionSchema);
 
+// ---------- Settings (key/value store) ----------
+const SettingsSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, unique: true, index: true, trim: true },
+    value: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  { timestamps: true, versionKey: false }
+);
+
+const Settings = mongoose.model('Settings', SettingsSchema);
+
 // ============================================================================
 // SECTION 5 — BUSINESS HELPERS
 // ============================================================================
+
+async function getSetting(key, defaultValue = null) {
+  try {
+    const doc = await Settings.findOne({ key }).lean();
+    return doc ? doc.value : defaultValue;
+  } catch (_) {
+    return defaultValue;
+  }
+}
+
+async function setSetting(key, value) {
+  const doc = await Settings.findOneAndUpdate(
+    { key },
+    { key, value },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+  return doc ? doc.value : value;
+}
+
+/**
+ * Registration is considered OPEN by default. Only an explicit
+ * `false` value disables it.
+ */
+async function isRegistrationOpen() {
+  const v = await getSetting('registration_open', true);
+  return v !== false;
+}
 
 async function reconcileGroupLeader(groupId) {
   const group = await Group.findById(groupId);
@@ -817,7 +847,7 @@ app.get('/api/health', (req, res) => {
     uptime: Math.floor(process.uptime()),
     db: states[mongoose.connection.readyState] || 'unknown',
     transactions: supportsTransactions,
-    version: '1.1.1',
+    version: '1.2.0',
   });
 });
 
@@ -833,10 +863,30 @@ app.get('/api/csrf-token', (req, res) => {
   return ok(res, { token });
 });
 
+// Public: is registration open?
+app.get(
+  '/api/registration-status',
+  asyncHandler(async (req, res) => {
+    const open = await isRegistrationOpen();
+    return ok(res, { open });
+  })
+);
+
 app.post(
   '/api/register',
   registerLimiter,
   asyncHandler(async (req, res) => {
+    // NEW: reject when registration is closed
+    const open = await isRegistrationOpen();
+    if (!open) {
+      return fail(
+        res,
+        'Registration is currently closed. Please check back later or contact the Administrator.',
+        'REGISTRATION_CLOSED',
+        403
+      );
+    }
+
     const body = req.body || {};
     const regNo = normalizeRegNo(body.regNo);
     const name = normalizeName(body.name);
@@ -1198,6 +1248,37 @@ app.get(
   requireAdmin,
   asyncHandler(async (req, res) => {
     return ok(res, { authenticated: true });
+  })
+);
+
+// Admin: current registration status
+app.get(
+  '/api/admin/registration-status',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const open = await isRegistrationOpen();
+    return ok(res, { open });
+  })
+);
+
+// Admin: toggle registration open/closed
+app.post(
+  '/api/admin/registration-toggle',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const current = await isRegistrationOpen();
+    const next = !current;
+    await setSetting('registration_open', next);
+
+    console.log(`[admin] registration submissions ${next ? 'OPENED' : 'CLOSED'}`);
+    sseBroadcast('registration-status', { open: next });
+
+    return ok(res, {
+      open: next,
+      message: next
+        ? 'Student registration submissions are now OPEN.'
+        : 'Student registration submissions are now CLOSED.',
+    });
   })
 );
 
@@ -1624,19 +1705,21 @@ app.get(
 );
 
 // ============================================================================
-// SECTION 11B — PDF EXPORT (pdfkit)
+// SECTION 11B — PDF EXPORT (muted, professional, same layout)
 // ============================================================================
 
 const PDF_COLORS = {
-  primary: '#0b3d91',
-  primaryDark: '#093174',
-  accent: '#1e6fd9',
+  textDark: '#111827',
   text: '#1f2937',
-  muted: '#6b7280',
-  border: '#e2e8f0',
-  rowAlt: '#f9fafc',
-  leaderBg: '#e7eefb',
+  textMuted: '#6b7280',
+  border: '#d1d5db',
+  borderLight: '#e5e7eb',
+  bgSubtle: '#f9fafb',
+  bgLight: '#f3f4f6',
+  bgMedium: '#e5e7eb',
   white: '#ffffff',
+  successText: '#15803d',
+  dangerText: '#b91c1c',
 };
 
 const PDF_LAYOUT = Object.freeze({
@@ -1683,7 +1766,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', (err) => reject(err));
 
-      // Add first page BEFORE reading page dimensions.
+      // Add first page BEFORE reading dimensions.
       doc.addPage();
 
       const pageWidth = (doc.page && doc.page.width) || A4_WIDTH;
@@ -1726,45 +1809,63 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       };
 
       function drawPageHeader() {
+        // Thin dark top bar
         doc.save();
-        doc.rect(0, 0, pageWidth, 92).fill(PDF_COLORS.primary);
-        doc.fillColor(PDF_COLORS.white).fontSize(20).font('Helvetica-Bold');
+        doc.rect(0, 0, pageWidth, 3).fill(PDF_COLORS.textDark);
+        doc.restore();
+
+        // Title
+        doc.fillColor(PDF_COLORS.textDark).fontSize(18).font('Helvetica-Bold');
         doc.text('PHYSICS EDUCATION GROUPS', PDF_LAYOUT.margin, 26, {
           width: contentWidth,
           align: 'left',
           lineBreak: false,
         });
-        doc.fontSize(9).font('Helvetica').fillColor('#cfdcf4');
-        doc.text(String(reportTitle || '').toUpperCase(), PDF_LAYOUT.margin, 54, {
+
+        // Subtitle
+        doc.fontSize(9).font('Helvetica').fillColor(PDF_COLORS.textMuted);
+        doc.text(String(reportTitle || '').toUpperCase(), PDF_LAYOUT.margin, 52, {
           width: contentWidth * 0.6,
           align: 'left',
           lineBreak: false,
         });
-        doc.fontSize(8).font('Helvetica').fillColor('#cfdcf4');
+
+        // Timestamp (right)
+        doc.fontSize(8).font('Helvetica').fillColor(PDF_COLORS.textMuted);
         doc.text(
           'Generated: ' + pdfFmtLong(new Date()),
           PDF_LAYOUT.margin + contentWidth * 0.6,
-          55,
+          53,
           { width: contentWidth * 0.4, align: 'right', lineBreak: false }
         );
+
+        // Thin rule
+        doc.save();
+        doc
+          .moveTo(PDF_LAYOUT.margin, 74)
+          .lineTo(pageWidth - PDF_LAYOUT.margin, 74)
+          .strokeColor(PDF_COLORS.border)
+          .lineWidth(0.5)
+          .stroke();
         doc.restore();
       }
 
       drawPageHeader();
 
-      let y = 112;
+      let y = 92;
 
       if (reportSubtitle) {
-        doc.fontSize(10).font('Helvetica-Oblique').fillColor(PDF_COLORS.muted);
+        doc.fontSize(10).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
         doc.text(reportSubtitle, contentLeft, y, { width: contentWidth, align: 'left' });
         y += 16;
       }
 
+      // Summary box — subtle gray, values in black
       const summaryBoxHeight = 62;
       doc.save();
       doc
-        .roundedRect(contentLeft, y, contentWidth, summaryBoxHeight, 6)
-        .fillAndStroke('#f9fafc', PDF_COLORS.border);
+        .roundedRect(contentLeft, y, contentWidth, summaryBoxHeight, 4)
+        .fillAndStroke(PDF_COLORS.bgSubtle, PDF_COLORS.border);
       doc.restore();
 
       const summaryItems = [
@@ -1776,9 +1877,9 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       const itemWidth = contentWidth / summaryItems.length;
       summaryItems.forEach((item, i) => {
         const ix = contentLeft + i * itemWidth + 14;
-        doc.fontSize(7.5).font('Helvetica-Bold').fillColor(PDF_COLORS.muted);
+        doc.fontSize(7.5).font('Helvetica-Bold').fillColor(PDF_COLORS.textMuted);
         doc.text(item.label, ix, y + 12, { width: itemWidth - 20, align: 'left' });
-        doc.fontSize(17).font('Helvetica-Bold').fillColor(PDF_COLORS.primary);
+        doc.fontSize(17).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
         doc.text(item.value, ix, y + 26, { width: itemWidth - 20, align: 'left' });
       });
 
@@ -1788,7 +1889,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         if (y + needed > pageHeight - PDF_LAYOUT.margin - PDF_LAYOUT.footerHeight + 10) {
           doc.addPage();
           drawPageHeader();
-          y = 112;
+          y = 92;
         }
       }
 
@@ -1796,22 +1897,28 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         ensureSpace(80);
 
         const headerHeight = 44;
+
+        // Group header box — light gray
         doc.save();
         doc
-          .roundedRect(contentLeft, y, contentWidth, headerHeight, 5)
-          .fillAndStroke(PDF_COLORS.leaderBg, PDF_COLORS.border);
+          .roundedRect(contentLeft, y, contentWidth, headerHeight, 4)
+          .fillAndStroke(PDF_COLORS.bgLight, PDF_COLORS.border);
         doc.restore();
 
+        // Number circle — white with dark outline
         doc.save();
-        doc.circle(contentLeft + 24, y + headerHeight / 2, 13).fill(PDF_COLORS.primary);
+        doc
+          .circle(contentLeft + 24, y + headerHeight / 2, 13)
+          .fillAndStroke(PDF_COLORS.white, PDF_COLORS.textDark);
         doc.restore();
-        doc.fontSize(11).font('Helvetica-Bold').fillColor(PDF_COLORS.white);
+        doc.fontSize(11).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
         doc.text(String(index), contentLeft + 18, y + headerHeight / 2 - 6, {
           width: 12,
           align: 'center',
         });
 
-        doc.fontSize(13).font('Helvetica-Bold').fillColor(PDF_COLORS.primaryDark);
+        // Group name — black
+        doc.fontSize(13).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
         doc.text(group.name, contentLeft + 48, y + 8, {
           width: contentWidth - 200,
           align: 'left',
@@ -1819,7 +1926,8 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        doc.fontSize(8.5).font('Helvetica').fillColor(PDF_COLORS.muted);
+        // Meta — gray
+        doc.fontSize(8.5).font('Helvetica').fillColor(PDF_COLORS.textMuted);
         const metaParts = [];
         metaParts.push(`${(group.members || []).length} / ${group.capacity || 10} members`);
         if (group.leaderName) {
@@ -1834,25 +1942,29 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
+        // Status badge — outlined, colored text only
         const isFull = (group.members || []).length >= (group.capacity || 10);
         const badgeText = isFull ? 'FULL' : 'OPEN';
-        const badgeBg = isFull ? '#b91c1c' : '#15803d';
+        const badgeColor = isFull ? PDF_COLORS.dangerText : PDF_COLORS.successText;
         const badgeWidth = 44;
         const badgeX = contentRight - badgeWidth - 12;
         doc.save();
-        doc.roundedRect(badgeX, y + 13, badgeWidth, 18, 9).fill(badgeBg);
+        doc
+          .roundedRect(badgeX, y + 13, badgeWidth, 18, 9)
+          .fillAndStroke(PDF_COLORS.white, badgeColor);
         doc.restore();
-        doc.fontSize(8).font('Helvetica-Bold').fillColor(PDF_COLORS.white);
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(badgeColor);
         doc.text(badgeText, badgeX, y + 18, { width: badgeWidth, align: 'center' });
 
         y += headerHeight + 8;
 
+        // Table header — light gray background, dark text
         doc.save();
-        doc.rect(contentLeft, y, contentWidth, 22).fill(PDF_COLORS.primary);
+        doc.rect(contentLeft, y, contentWidth, 22).fill(PDF_COLORS.bgMedium);
         doc.restore();
 
         const headerY = y + 7;
-        doc.fontSize(8).font('Helvetica-Bold').fillColor(PDF_COLORS.white);
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
         doc.text('#', colX.idx + 4, headerY, { width: colWidths.idx - 8, align: 'left', lineBreak: false });
         doc.text('REG NO', colX.regNo + 6, headerY, { width: colWidths.regNo - 8, align: 'left', lineBreak: false });
         doc.text('NAME', colX.name + 6, headerY, { width: colWidths.name - 8, align: 'left', lineBreak: false });
@@ -1866,23 +1978,24 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         const rowHeight = 22;
         ensureSpace(rowHeight + 2);
 
+        // Row background — muted
         if (isLeader) {
           doc.save();
-          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.leaderBg);
+          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.bgLight);
+          doc.restore();
+          // Thin left accent bar
+          doc.save();
+          doc.rect(contentLeft, y, 2, rowHeight).fill(PDF_COLORS.textDark);
           doc.restore();
         } else if (idx % 2 === 1) {
           doc.save();
-          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.rowAlt);
-          doc.restore();
-        }
-
-        if (isLeader) {
-          doc.save();
-          doc.rect(contentLeft, y, 3, rowHeight).fill(PDF_COLORS.accent);
+          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.bgSubtle);
           doc.restore();
         }
 
         const cellY = y + 7;
+
+        // Index
         doc.fontSize(9).font('Helvetica').fillColor(PDF_COLORS.text);
         doc.text(String(idx), colX.idx + 4, cellY, {
           width: colWidths.idx - 8,
@@ -1891,7 +2004,8 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        doc.font('Helvetica-Bold').fillColor(PDF_COLORS.primaryDark);
+        // REG NO — bold dark
+        doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
         doc.text(m.regNo || '', colX.regNo + 6, cellY, {
           width: colWidths.regNo - 8,
           align: 'left',
@@ -1899,6 +2013,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
+        // NAME — bold if leader
         doc.font(isLeader ? 'Helvetica-Bold' : 'Helvetica').fillColor(PDF_COLORS.text);
         doc.text(m.name || '', colX.name + 6, cellY, {
           width: colWidths.name - 8,
@@ -1907,7 +2022,8 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        doc.font('Helvetica').fillColor(PDF_COLORS.text);
+        // PHONE — gray
+        doc.font('Helvetica').fillColor(PDF_COLORS.textMuted);
         doc.text(m.phone || '', colX.phone + 6, cellY, {
           width: colWidths.phone - 8,
           align: 'left',
@@ -1915,8 +2031,9 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
+        // ROLE
         if (isLeader) {
-          doc.font('Helvetica-Bold').fillColor(PDF_COLORS.primary);
+          doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
           doc.text('GROUP LEADER', colX.role + 6, cellY, {
             width: colWidths.role - 8,
             align: 'left',
@@ -1924,7 +2041,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
             ellipsis: true,
           });
         } else {
-          doc.font('Helvetica').fillColor(PDF_COLORS.muted);
+          doc.font('Helvetica').fillColor(PDF_COLORS.textMuted);
           doc.text('MEMBER', colX.role + 6, cellY, {
             width: colWidths.role - 8,
             align: 'left',
@@ -1933,11 +2050,12 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           });
         }
 
+        // Bottom border
         doc.save();
         doc
           .moveTo(contentLeft, y + rowHeight)
           .lineTo(contentRight, y + rowHeight)
-          .strokeColor(PDF_COLORS.border)
+          .strokeColor(PDF_COLORS.borderLight)
           .lineWidth(0.4)
           .stroke();
         doc.restore();
@@ -1946,7 +2064,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       }
 
       if (groups.length === 0) {
-        doc.fontSize(11).font('Helvetica-Oblique').fillColor(PDF_COLORS.muted);
+        doc.fontSize(11).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
         doc.text('No groups have been registered yet.', contentLeft, y + 20, {
           width: contentWidth,
           align: 'center',
@@ -1961,9 +2079,9 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
             doc.save();
             doc
               .rect(contentLeft, y, contentWidth, emptyHeight)
-              .fillAndStroke('#fdf6e3', '#f2dfa4');
+              .fillAndStroke(PDF_COLORS.bgSubtle, PDF_COLORS.border);
             doc.restore();
-            doc.fontSize(9).font('Helvetica-Oblique').fillColor('#a16207');
+            doc.fontSize(9).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
             doc.text('No members in this group yet.', contentLeft + 8, y + 8, {
               width: contentWidth - 16,
               align: 'left',
@@ -1990,12 +2108,12 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         doc
           .moveTo(contentLeft, footerY - 8)
           .lineTo(contentRight, footerY - 8)
-          .strokeColor(PDF_COLORS.border)
+          .strokeColor(PDF_COLORS.borderLight)
           .lineWidth(0.5)
           .stroke();
         doc.restore();
 
-        doc.fontSize(7.5).font('Helvetica').fillColor(PDF_COLORS.muted);
+        doc.fontSize(7.5).font('Helvetica').fillColor(PDF_COLORS.textMuted);
         doc.text(
           'Physics Education Groups  •  Confidential administrative document',
           contentLeft,
