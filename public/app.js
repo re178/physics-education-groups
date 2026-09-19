@@ -5,10 +5,11 @@
  *   - Device fingerprint (persistent browser ID + metadata)
  *   - CSRF token fetching
  *   - API helper with JSON + error normalization
- *   - Registration form (index.html)
+ *   - Registration form (index.html) with open/closed guard
  *   - Member login + dashboard (member.html)
  *   - Admin login + dashboard + group detail + SSE (admin.html)
- *   - Modal helpers, alerts, confirmations, CSV export
+ *   - Registration submissions toggle (admin)
+ *   - Modal helpers, alerts, confirmations, CSV/PDF export
  *
  * No framework. No build step. Pure browser JavaScript.
  *
@@ -478,6 +479,58 @@
     const submitBtn = document.getElementById('submit-btn');
     const successCard = document.getElementById('success-card');
 
+    // --------------------------------------------------------
+    // NEW: Check if registration is currently open.
+    // If closed, disable the form and show a clear notice.
+    // --------------------------------------------------------
+    let registrationOpen = true;
+
+    function applyRegistrationState(open) {
+      registrationOpen = open;
+      const formWrap = form.closest('.card');
+      const submitBtnEl = document.getElementById('submit-btn');
+
+      // Remove any previous closed notice
+      const existingNotice = document.getElementById('registration-closed-notice');
+      if (existingNotice) existingNotice.remove();
+
+      if (open) {
+        form.hidden = false;
+        if (formWrap) formWrap.hidden = false;
+      } else {
+        // Insert a "closed" notice above the form and hide the form
+        if (formWrap && formWrap.parentNode) {
+          const notice = el('div', { class: 'card card-info', id: 'registration-closed-notice' }, [
+            el('div', { class: 'card-head' }, [
+              el('h2', { text: 'Registration is currently closed' }),
+            ]),
+            el('p', {
+              text:
+                'Student registration submissions are temporarily closed. ' +
+                'Please check back later or contact the Administrator.',
+            }),
+          ]);
+          formWrap.parentNode.insertBefore(notice, formWrap);
+        }
+        form.hidden = true;
+      }
+
+      if (submitBtnEl) submitBtnEl.disabled = !open;
+    }
+
+    // Fetch current status from the server.
+    (async () => {
+      try {
+        const { ok, data } = await api('/api/registration-status');
+        if (ok && data && typeof data.open === 'boolean') {
+          applyRegistrationState(data.open);
+        }
+      } catch (_) {
+        // If the check fails, assume open so users can still try.
+        applyRegistrationState(true);
+      }
+    })();
+
     form.addEventListener('reset', () => {
       clearFieldErrors(form);
       Alert.clear();
@@ -488,6 +541,14 @@
       e.preventDefault();
       clearFieldErrors(form);
       Alert.clear();
+
+      if (!registrationOpen) {
+        Alert.warning(
+          'Registration is currently closed. Please check back later.',
+          { title: 'Registration closed' }
+        );
+        return;
+      }
 
       const regNo = ($('#regNo') || {}).value || '';
       const name = ($('#name') || {}).value || '';
@@ -545,6 +606,10 @@
         Alert.warning(message, { title: 'Group full' });
       } else if (code === 'DEVICE_USED') {
         Alert.warning(message, { title: 'Device already used' });
+      } else if (code === 'REGISTRATION_CLOSED') {
+        // Server-side closed detection — sync UI
+        applyRegistrationState(false);
+        Alert.warning(message, { title: 'Registration closed' });
       } else if (code === 'INVALID_REQNO' || code === 'INVALID_NAME' || code === 'INVALID_PHONE' || code === 'INVALID_GROUP') {
         Alert.error(message, { title: 'Check your input' });
       } else if (!Alert.isShowing()) {
@@ -776,19 +841,47 @@
     const logoutBtn = document.getElementById('admin-logout-btn');
     const liveIndicator = document.getElementById('live-indicator');
 
-    /* ----------------------------------------------------------
-     * STATE — declared FIRST so nothing can reference these
-     * before initialization (fixes the "Cannot access 'sse'
-     * before initialization" TDZ error).
-     * ---------------------------------------------------------- */
+    /* ---- STATE FIRST (prevents TDZ errors) ---- */
     let sse = null;
     let sseReconnectDelay = 1000;
     let currentGroupId = null;
     let currentGroupData = null;
 
-    /* ----------------------------------------------------------
-     * SSE functions — declared BEFORE showLogin() uses them.
-     * ---------------------------------------------------------- */
+    /* ---- Registration status UI ---- */
+    function renderRegistrationStatus(open) {
+      const pill = document.getElementById('submissions-status-pill');
+      const help = document.getElementById('submissions-status-help');
+      const toggleBtn = document.getElementById('btn-toggle-registration');
+
+      if (pill) {
+        pill.textContent = open ? 'OPEN' : 'CLOSED';
+        pill.classList.toggle('badge-open', open);
+        pill.classList.toggle('badge-full', !open);
+      }
+      if (help) {
+        help.textContent = open
+          ? 'New students can currently register themselves.'
+          : 'New student registrations are currently blocked.';
+      }
+      if (toggleBtn) {
+        const label = toggleBtn.querySelector('.btn-label');
+        if (label) {
+          label.textContent = open ? 'Close Submissions' : 'Open Submissions';
+        }
+        // Swap visual style: danger when open (action = close), primary when closed (action = open)
+        toggleBtn.classList.toggle('btn-danger-outline', open);
+        toggleBtn.classList.toggle('btn-primary', !open);
+      }
+    }
+
+    async function loadRegistrationStatus() {
+      const { ok, data } = await api('/api/admin/registration-status');
+      if (ok && data && typeof data.open === 'boolean') {
+        renderRegistrationStatus(data.open);
+      }
+    }
+
+    /* ---- SSE functions ---- */
     function startSse() {
       if (sse) return;
       try {
@@ -827,6 +920,16 @@
           refreshAll();
         });
 
+        // NEW: listen for registration status changes made by any admin tab.
+        sse.addEventListener('registration-status', (ev) => {
+          try {
+            const payload = JSON.parse(ev.data);
+            if (payload && typeof payload.open === 'boolean') {
+              renderRegistrationStatus(payload.open);
+            }
+          } catch (_) { /* ignore */ }
+        });
+
         ['member-added', 'member-updated', 'member-deleted', 'group-created', 'group-updated', 'group-deleted']
           .forEach((evName) => {
             sse.addEventListener(evName, () => refreshAll());
@@ -846,9 +949,7 @@
 
     window.addEventListener('beforeunload', stopSse);
 
-    /* ----------------------------------------------------------
-     * View switching
-     * ---------------------------------------------------------- */
+    /* ---- View switching ---- */
     function showLogin() {
       loginView.hidden = false;
       dashView.hidden = true;
@@ -870,21 +971,17 @@
       if (logoutBtn) logoutBtn.hidden = false;
     }
 
-    /* ----------------------------------------------------------
-     * Session check
-     * ---------------------------------------------------------- */
+    /* ---- Session check ---- */
     const me = await api('/api/admin/me');
     if (me.ok && me.data && me.data.success) {
-      await loadDashboard();
+      await Promise.all([loadDashboard(), loadRegistrationStatus()]);
       startSse();
       showDashboard();
     } else {
       showLogin();
     }
 
-    /* ----------------------------------------------------------
-     * Login
-     * ---------------------------------------------------------- */
+    /* ---- Login ---- */
     if (loginForm) {
       loginForm.addEventListener('submit', withLoading(loginBtn, async (e) => {
         e.preventDefault();
@@ -907,7 +1004,7 @@
         if (ok && data && data.success) {
           Alert.success('Welcome, administrator.', { timeout: 2500 });
           loginForm.reset();
-          await loadDashboard();
+          await Promise.all([loadDashboard(), loadRegistrationStatus()]);
           startSse();
           showDashboard();
         } else {
@@ -919,9 +1016,7 @@
       }));
     }
 
-    /* ----------------------------------------------------------
-     * Logout
-     * ---------------------------------------------------------- */
+    /* ---- Logout ---- */
     if (logoutBtn) {
       logoutBtn.addEventListener('click', async () => {
         const confirmed = await Modal.confirm('Log out of the administrator portal?', {
@@ -939,9 +1034,42 @@
       });
     }
 
-    /* ----------------------------------------------------------
-     * Dashboard
-     * ---------------------------------------------------------- */
+    /* ---- Registration toggle button ---- */
+    const toggleRegBtn = document.getElementById('btn-toggle-registration');
+    if (toggleRegBtn) {
+      toggleRegBtn.addEventListener('click', withLoading(toggleRegBtn, async () => {
+        const currentPill = document.getElementById('submissions-status-pill');
+        const isOpen = currentPill && currentPill.textContent.trim().toUpperCase() === 'OPEN';
+
+        const confirmed = await Modal.confirm(
+          isOpen
+            ? 'Close student registration submissions? New students will no longer be able to register themselves. You can still add members manually.'
+            : 'Open student registration submissions? New students will be able to register themselves immediately.',
+          {
+            title: isOpen ? 'Close Submissions' : 'Open Submissions',
+            okText: isOpen ? 'Close Submissions' : 'Open Submissions',
+            cancelText: 'Cancel',
+          }
+        );
+        if (!confirmed) return;
+
+        const { ok, data } = await api('/api/admin/registration-toggle', { method: 'POST' });
+        if (ok && data && typeof data.open === 'boolean') {
+          renderRegistrationStatus(data.open);
+          Alert.success(
+            data.message ||
+              (data.open
+                ? 'Student registration submissions are now OPEN.'
+                : 'Student registration submissions are now CLOSED.'),
+            { timeout: 3000 }
+          );
+        } else {
+          Alert.error((data && data.message) || 'Could not change registration status.');
+        }
+      }));
+    }
+
+    /* ---- Dashboard ---- */
     async function loadDashboard() {
       const { ok, data } = await api('/api/admin/dashboard');
       if (!ok || !data || !data.success) {
@@ -1047,20 +1175,16 @@
       if (grid) grid.innerHTML = '<p class="muted">Loading groups…</p>';
     }
 
-    /* ----------------------------------------------------------
-     * Refresh
-     * ---------------------------------------------------------- */
+    /* ---- Refresh ---- */
     const refreshBtn = document.getElementById('btn-refresh-dashboard');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', withLoading(refreshBtn, async () => {
-        await loadDashboard();
+        await Promise.all([loadDashboard(), loadRegistrationStatus()]);
         Alert.success('Refreshed.', { timeout: 1500 });
       }));
     }
 
-    /* ----------------------------------------------------------
-     * Create group
-     * ---------------------------------------------------------- */
+    /* ---- Create group ---- */
     const createGroupBtn = document.getElementById('btn-create-group');
     if (createGroupBtn) {
       createGroupBtn.addEventListener('click', () => openGroupModal(null));
@@ -1123,9 +1247,7 @@
       }));
     }
 
-    /* ----------------------------------------------------------
-     * Group detail
-     * ---------------------------------------------------------- */
+    /* ---- Group detail ---- */
     async function openGroup(groupId) {
       currentGroupId = groupId;
       const { ok, data } = await api(`/api/admin/groups/${encodeURIComponent(groupId)}`);
@@ -1355,19 +1477,13 @@
       }
     }
 
-    /* ----------------------------------------------------------
-     * Export CSV — plain link; browser handles the download.
-     * ---------------------------------------------------------- */
-    const exportLink = document.getElementById('btn-export-csv');
-    if (exportLink) {
-      exportLink.addEventListener('click', (e) => {
-        e.currentTarget.blur();
-      });
-    }
+    /* ---- Export links: blur on click so button doesn't stay focused ---- */
+    ['btn-export-csv', 'btn-export-pdf'].forEach((id) => {
+      const link = document.getElementById(id);
+      if (link) link.addEventListener('click', (e) => e.currentTarget.blur());
+    });
 
-    /* ----------------------------------------------------------
-     * Deep link: /admin-group?id=xxx
-     * ---------------------------------------------------------- */
+    /* ---- Deep link: /admin-group?id=xxx ---- */
     const params = new URLSearchParams(window.location.search);
     const qsId = params.get('id');
     if (qsId && me.ok && me.data && me.data.success) {
@@ -1379,22 +1495,15 @@
 
   /* ============================================================
    * 12. Auto-bootstrap by page
-   * ------------------------------------------------------------
-   * Detects which HTML page we're on by a unique DOM id and
-   * runs the matching initializer. This avoids the need for
-   * inline <script> tags (which Helmet's CSP blocks).
    * ============================================================ */
   function bootstrap() {
     wireVisibilityToggles();
 
-    // Prefetch CSRF token on every page.
     getCsrfToken().catch(() => {});
 
-    // Set footer year if a #footer-year element exists.
     const yearEl = document.getElementById('footer-year');
     if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
-    // Page detection — each page has exactly one of these forms.
     if (document.getElementById('register-form')) {
       initRegisterPage();
     }
