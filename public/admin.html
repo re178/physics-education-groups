@@ -139,6 +139,19 @@
       </div>
     </section>
 
+    <!-- Submission status banner -->
+    <section class="card card-flat" aria-label="Submission status">
+      <div class="submission-status-row">
+        <div class="submission-status-info">
+          <span class="submission-status-label">Student Registration Submissions:</span>
+          <span class="badge badge-open" id="submissions-status-pill" aria-live="polite">OPEN</span>
+          <span class="muted small" id="submissions-status-help">
+            New students can currently register themselves.
+          </span>
+        </div>
+      </div>
+    </section>
+
     <!-- Toolbar -->
     <section class="toolbar">
       <div class="toolbar-left">
@@ -151,6 +164,10 @@
         </button>
       </div>
       <div class="toolbar-right">
+        <button type="button" class="btn btn-danger-outline" id="btn-toggle-registration">
+          <span class="btn-label">Close Submissions</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
         <a class="btn btn-secondary" href="/api/admin/export" id="btn-export-csv">
           ⬇ Export CSV
         </a>
