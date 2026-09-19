@@ -1,6 +1,6 @@
 {
   "name": "physics-education-groups",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Physics Education Groups — student group registration and management system.",
   "main": "server.js",
@@ -18,7 +18,8 @@
     "express",
     "mongodb",
     "mongoose",
-    "render"
+    "render",
+    "pdf"
   ],
   "author": "Physics Education Groups",
   "license": "MIT",
@@ -29,6 +30,7 @@
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "helmet": "^7.1.0",
-    "mongoose": "^8.5.1"
+    "mongoose": "^8.5.1",
+    "pdfkit": "^0.15.0"
   }
 }
