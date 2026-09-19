@@ -14,8 +14,9 @@
  *   5. Middleware: Helmet, CORS, rate limiting, CSRF, auth, error handler
  *   6. Services: registration, group ops, member ops, admin ops, export
  *   7. Routes: public, member, admin, SSE events
- *   8. Static file serving for /public
- *   9. Graceful startup and shutdown
+ *   8. PDF export (pdfkit) for admin (all groups) and member (own group)
+ *   9. Static file serving for /public
+ *  10. Graceful startup and shutdown
  *
  * No frameworks beyond Express. No React. No Firebase. No MySQL.
  * Deployable to Render with `npm start`.
@@ -35,6 +36,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
+const PDFDocument = require('pdfkit');
 
 // ============================================================================
 // SECTION 1 — ENVIRONMENT
@@ -93,7 +95,6 @@ const CORS_ORIGIN = readList('CORS_ORIGIN', []);
 const STORE_IP_HASH = readBool('STORE_IP_HASH', false);
 const ENFORCE_DEVICE_LOCK = readBool('ENFORCE_DEVICE_LOCK', true);
 
-// Fallbacks + validation
 if (!MONGODB_URI) {
   console.error('\n[env] FATAL: MONGODB_URI is required. Set it in .env or Render env vars.\n');
   process.exit(1);
@@ -142,21 +143,15 @@ console.log(`[boot] Physics Education Groups starting in ${NODE_ENV} mode on por
 // SECTION 2 — UTILITIES (normalization, validation, hashing)
 // ============================================================================
 
-/**
- * Normalize a group name for comparison:
- *   "  Group A  " → "group a"
- *   "GROUP  A"   → "group a"  (multiple spaces collapsed)
- */
 function normalizeGroupName(raw) {
   if (raw === null || raw === undefined) return '';
   return String(raw)
-    .replace(/[\u0000-\u001F\u007F]/g, '') // strip control chars
+    .replace(/[\u0000-\u001F\u007F]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
 }
 
-/** Preserve display casing but strip control chars and collapse whitespace. */
 function displayGroupName(raw) {
   if (raw === null || raw === undefined) return '';
   return String(raw)
@@ -165,7 +160,6 @@ function displayGroupName(raw) {
     .trim();
 }
 
-/** Normalize regNo: trim, collapse internal whitespace, uppercase. */
 function normalizeRegNo(raw) {
   if (raw === null || raw === undefined) return '';
   return String(raw)
@@ -175,7 +169,6 @@ function normalizeRegNo(raw) {
     .toUpperCase();
 }
 
-/** Normalize a person's name (trim + collapse whitespace). */
 function normalizeName(raw) {
   if (raw === null || raw === undefined) return '';
   return String(raw)
@@ -184,14 +177,6 @@ function normalizeName(raw) {
     .trim();
 }
 
-/**
- * Normalize Kenyan phone numbers to E.164 (+2547XXXXXXXX or +2541XXXXXXXX).
- * Accepts:
- *   0712345678, 0700123456, 0112345678
- *   254712345678, 254112345678
- *   +254712345678, +254112345678
- * Returns null if invalid.
- */
 function normalizePhone(raw) {
   if (raw === null || raw === undefined) return null;
   let s = String(raw).replace(/[\s\-().]/g, '');
@@ -201,7 +186,6 @@ function normalizePhone(raw) {
   return null;
 }
 
-/** Validate a device ID: alphanumeric with dashes, 8–128 chars. */
 function isValidDeviceId(id) {
   if (!id || typeof id !== 'string') return false;
   const trimmed = id.trim();
@@ -209,7 +193,6 @@ function isValidDeviceId(id) {
   return /^[A-Za-z0-9_\-:]+$/.test(trimmed);
 }
 
-/** Validate group name: non-empty after normalization, <= 80 chars. */
 function isValidGroupName(raw) {
   const n = normalizeGroupName(raw);
   if (!n) return false;
@@ -217,21 +200,18 @@ function isValidGroupName(raw) {
   return true;
 }
 
-/** Validate regNo: 3–40 chars after normalization, printable. */
 function isValidRegNo(raw) {
   const n = normalizeRegNo(raw);
   if (n.length < 3 || n.length > 40) return false;
   return /^[A-Z0-9\-\/_.]+$/.test(n);
 }
 
-/** Validate full name: 2–120 chars. */
 function isValidName(raw) {
   const n = normalizeName(raw);
   if (n.length < 2 || n.length > 120) return false;
   return /^[\p{L}\p{M}0-9 .,'\-()]+$/u.test(n);
 }
 
-/** Sanitize device metadata to a known-safe subset. */
 function sanitizeDeviceMetadata(meta) {
   if (!meta || typeof meta !== 'object') return {};
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -268,13 +248,11 @@ function sanitizeDeviceMetadata(meta) {
   };
 }
 
-/** One-way hash of the client IP. Never store raw IPs. */
 function hashIp(ip) {
   if (!ip) return null;
   return crypto.createHmac('sha256', SESSION_SECRET).update(String(ip)).digest('hex');
 }
 
-/** scrypt password hashing. */
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -293,7 +271,6 @@ function verifyPassword(password, salt, hash) {
   }
 }
 
-/** Compare two strings in constant time. */
 function safeEqual(a, b) {
   const ba = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
@@ -301,11 +278,9 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ba, bb);
 }
 
-/** Async route wrapper. */
 const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
-/** Custom error with a code + HTTP status + user-facing message. */
 class AppError extends Error {
   constructor(message, code = 'ERROR', status = 400) {
     super(message);
@@ -315,12 +290,10 @@ class AppError extends Error {
   }
 }
 
-/** Standard success envelope. */
 function ok(res, payload = {}, status = 200) {
   return res.status(status).json({ success: true, ...payload });
 }
 
-/** Standard error envelope. */
 function fail(res, message, code = 'ERROR', status = 400) {
   return res.status(status).json({ success: false, message, code });
 }
@@ -385,7 +358,6 @@ async function connectDatabase() {
   supportsTransactions = await detectTransactionSupport();
   console.log(`[db] Transactions: ${supportsTransactions ? 'ENABLED' : 'DISABLED'}`);
 
-  // Sync indexes across all models.
   for (const name of mongoose.modelNames()) {
     try {
       await mongoose.model(name).syncIndexes();
@@ -612,12 +584,6 @@ const AdminSession = mongoose.model('AdminSession', AdminSessionSchema);
 // SECTION 5 — BUSINESS HELPERS
 // ============================================================================
 
-/**
- * Ensure the group has exactly one leader if it is non-empty.
- * - If no leader and group has members → promote earliest member.
- * - If leader no longer belongs to the group → promote earliest member.
- * - If multiple leaders exist → keep only the assigned one.
- */
 async function reconcileGroupLeader(groupId) {
   const group = await Group.findById(groupId);
   if (!group) return null;
@@ -641,7 +607,6 @@ async function reconcileGroupLeader(groupId) {
     await group.save();
   }
 
-  // Enforce exactly one isLeader:true
   const leaderMember = members.find((m) => String(m._id) === String(leaderId));
   if (leaderMember && !leaderMember.isLeader) {
     await Member.updateOne({ _id: leaderMember._id }, { $set: { isLeader: true } });
@@ -654,14 +619,12 @@ async function reconcileGroupLeader(groupId) {
   return group;
 }
 
-/** Recalculate and persist a group's memberCount from the members collection. */
 async function recalcMemberCount(groupId) {
   const count = await Member.countDocuments({ group: groupId });
   await Group.updateOne({ _id: groupId }, { $set: { memberCount: count } });
   return count;
 }
 
-/** Public shape for a group returned to admins/members. */
 function shapeGroup(group, extra = {}) {
   return {
     id: String(group._id),
@@ -677,7 +640,6 @@ function shapeGroup(group, extra = {}) {
   };
 }
 
-/** Public shape for a member. */
 function shapeMember(member) {
   return {
     id: String(member._id),
@@ -709,7 +671,6 @@ function sseBroadcast(event, data) {
   }
 }
 
-// Heartbeat keeps proxies and Render from closing idle connections.
 setInterval(() => {
   for (const res of sseClients) {
     try {
@@ -725,9 +686,8 @@ setInterval(() => {
 // ============================================================================
 
 const app = express();
-app.set('trust proxy', 1); // Render terminates TLS in front of us.
+app.set('trust proxy', 1);
 
-// Helmet — CSP allows our own assets only.
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -754,11 +714,10 @@ app.use(
   })
 );
 
-// CORS — same-origin by default; allow explicit list.
 app.use(
   cors({
     origin(origin, cb) {
-      if (!origin) return cb(null, true); // same-origin / curl
+      if (!origin) return cb(null, true);
       if (CORS_ORIGIN.length === 0) return cb(null, false);
       return cb(null, CORS_ORIGIN.includes(origin));
     },
@@ -766,12 +725,10 @@ app.use(
   })
 );
 
-// Body parsing (small limits).
 app.use(express.json({ limit: '64kb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
 
-// Rate limiting.
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 400,
@@ -798,7 +755,6 @@ const loginLimiter = rateLimit({
 
 app.use('/api/', generalLimiter);
 
-// CSRF: double-submit cookie. Token is issued by GET /api/csrf-token.
 function requireCsrf(req, res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   const cookieToken = req.cookies ? req.cookies[CONFIG.CSRF_COOKIE] : null;
@@ -810,7 +766,6 @@ function requireCsrf(req, res, next) {
 }
 app.use('/api/', requireCsrf);
 
-// Cookie helpers.
 const cookieOpts = (maxAgeMs) => ({
   httpOnly: true,
   secure: CONFIG.COOKIE_SECURE,
@@ -819,7 +774,6 @@ const cookieOpts = (maxAgeMs) => ({
   path: '/',
 });
 
-// Auth middlewares.
 async function attachSession(req, res, next, cookieName, role) {
   try {
     const token = req.cookies ? req.cookies[cookieName] : null;
@@ -866,14 +820,14 @@ app.get('/api/health', (req, res) => {
     uptime: Math.floor(process.uptime()),
     db: states[mongoose.connection.readyState] || 'unknown',
     transactions: supportsTransactions,
-    version: '1.0.0',
+    version: '1.1.0',
   });
 });
 
 app.get('/api/csrf-token', (req, res) => {
   const token = crypto.randomBytes(24).toString('hex');
   res.cookie(CONFIG.CSRF_COOKIE, token, {
-    httpOnly: false, // JS does not strictly need to read this; we return it in the body.
+    httpOnly: false,
     secure: CONFIG.COOKIE_SECURE,
     sameSite: CONFIG.COOKIE_SAME_SITE,
     maxAge: CONFIG.CSRF_TTL_MS,
@@ -882,10 +836,6 @@ app.get('/api/csrf-token', (req, res) => {
   return ok(res, { token });
 });
 
-/**
- * POST /api/register
- * Body: { regNo, name, phone, groupName, deviceId, deviceMetadata }
- */
 app.post(
   '/api/register',
   registerLimiter,
@@ -899,7 +849,6 @@ app.post(
     const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
     const deviceMetadata = sanitizeDeviceMetadata(body.deviceMetadata);
 
-    // 1) Field validation
     if (!isValidRegNo(regNo)) {
       return fail(res, 'Please provide a valid registration number.', 'INVALID_REQNO', 400);
     }
@@ -917,7 +866,6 @@ app.post(
       return fail(res, 'Unable to identify this device. Please refresh and try again.', 'INVALID_DEVICE', 400);
     }
 
-    // 2) Duplicate REG NO
     const existingReg = await Member.findOne({ regNo }).lean();
     if (existingReg) {
       console.log(`[register] rejected duplicate regNo=${regNo}`);
@@ -929,7 +877,6 @@ app.post(
       );
     }
 
-    // 3) Device lock
     if (ENFORCE_DEVICE_LOCK) {
       const existingDevice = await Member.findOne({ deviceId }).lean();
       if (existingDevice) {
@@ -943,7 +890,6 @@ app.post(
       }
     }
 
-    // 4) Find or create group
     let group = await Group.findOne({ normalizedName: groupNorm });
     let isNewGroup = false;
 
@@ -958,7 +904,6 @@ app.post(
         console.log(`[register] created group "${groupDisplay}"`);
       } catch (err) {
         if (err && err.code === 11000) {
-          // Race: someone else created it first — reload.
           group = await Group.findOne({ normalizedName: groupNorm });
         } else {
           throw err;
@@ -970,7 +915,6 @@ app.post(
       return fail(res, 'We could not complete your registration. Please contact the Administrator.', 'GROUP_CREATE_FAILED', 500);
     }
 
-    // 5) Atomic capacity increment — this is the hard gate.
     const incremented = await Group.findOneAndUpdate(
       { _id: group._id, memberCount: { $lt: CONFIG.MAX_GROUP_MEMBERS } },
       { $inc: { memberCount: 1 } },
@@ -987,10 +931,8 @@ app.post(
       );
     }
 
-    // 6) Determine leader: first member of the group.
     const isLeader = incremented.memberCount === 1;
 
-    // 7) Create the member.
     let member;
     try {
       member = await Member.create({
@@ -1004,7 +946,6 @@ app.post(
         ipHash: STORE_IP_HASH ? hashIp(req.ip) : null,
       });
     } catch (err) {
-      // Roll back the atomic increment.
       await Group.updateOne({ _id: group._id }, { $inc: { memberCount: -1 } });
 
       if (err && err.code === 11000) {
@@ -1029,17 +970,14 @@ app.post(
       throw err;
     }
 
-    // 8) Assign leader on the group if this was the first member.
     if (isLeader) {
       await Group.updateOne({ _id: group._id, leader: null }, { $set: { leader: member._id } });
       await reconcileGroupLeader(group._id);
       console.log(`[register] leader assigned: ${regNo} → ${group.normalizedName}`);
     }
 
-    // 9) Recompute count defensively (should match).
     const freshCount = await recalcMemberCount(group._id);
 
-    // 10) Notify admin SSE listeners.
     const finalGroup = await Group.findById(group._id);
     sseBroadcast('registration', {
       member: shapeMember(member),
@@ -1048,7 +986,6 @@ app.post(
       isLeader,
     });
 
-    // 11) Success response.
     console.log(`[register] success regNo=${regNo} group=${group.normalizedName} leader=${isLeader}`);
 
     const message = isLeader
@@ -1094,7 +1031,6 @@ app.post(
       return fail(res, 'Invalid group name or registration number.', 'INVALID_CREDENTIALS', 401);
     }
 
-    // Create member session.
     const token = crypto.randomBytes(48).toString('hex');
     await AdminSession.create({
       token,
@@ -1158,7 +1094,6 @@ app.get(
       return fail(res, 'Group not found.', 'NOT_FOUND', 404);
     }
 
-    // Server-side enforcement: only members of this group.
     const members = await Member.find({ group: group._id })
       .sort({ isLeader: -1, createdAt: 1 })
       .select('regNo name phone isLeader group createdAt')
@@ -1204,7 +1139,6 @@ app.post(
     let admin = await Admin.findOne({ username }).select('+passwordHash +passwordSalt');
 
     if (!admin) {
-      // Bootstrap: only the env-defined credentials can create the admin.
       if (username !== ADMIN_USERNAME.toLowerCase() || !safeEqual(password, ADMIN_PASSWORD)) {
         console.warn(`[admin-login] rejected unknown user "${username}"`);
         return fail(res, 'Invalid administrator credentials.', 'INVALID_CREDENTIALS', 401);
@@ -1226,13 +1160,11 @@ app.post(
       }
     }
 
-    // Update login stats.
     await Admin.updateOne(
       { _id: admin._id },
       { $set: { lastLoginAt: new Date() }, $inc: { loginCount: 1 } }
     );
 
-    // Create session.
     const token = crypto.randomBytes(48).toString('hex');
     await AdminSession.create({
       token,
@@ -1464,8 +1396,6 @@ app.delete(
   })
 );
 
-// ------------------- Admin: Members -------------------
-
 app.post(
   '/api/admin/members',
   requireAdmin,
@@ -1493,7 +1423,6 @@ app.post(
       );
     }
 
-    // Atomic capacity increment.
     const incremented = await Group.findOneAndUpdate(
       { _id: group._id, memberCount: { $lt: CONFIG.MAX_GROUP_MEMBERS } },
       { $inc: { memberCount: 1 } },
@@ -1563,7 +1492,6 @@ app.patch(
     if (!newPhone) return fail(res, 'Invalid Kenyan phone number.', 'INVALID_PHONE', 400);
     if (!mongoose.isValidObjectId(newGroupId)) return fail(res, 'Invalid group.', 'INVALID_GROUP', 400);
 
-    // Unique regNo (excluding self).
     const clash = await Member.findOne({ regNo: newRegNo, _id: { $ne: member._id } });
     if (clash) {
       return fail(res, 'Another member already uses this registration number.', 'DUPLICATE_REGNO', 409);
@@ -1575,7 +1503,6 @@ app.patch(
       const target = await Group.findById(newGroupId);
       if (!target) return fail(res, 'Target group not found.', 'NOT_FOUND', 404);
 
-      // Atomic capacity increment on target.
       const incremented = await Group.findOneAndUpdate(
         { _id: target._id, memberCount: { $lt: CONFIG.MAX_GROUP_MEMBERS } },
         { $inc: { memberCount: 1 } },
@@ -1585,18 +1512,15 @@ app.patch(
         return fail(res, 'Target group is already full.', 'GROUP_FULL', 409);
       }
 
-      // Move.
       member.regNo = newRegNo;
       member.name = newName;
       member.phone = newPhone;
       member.group = target._id;
-      member.isLeader = false; // Demote; reconciliation will re-promote if target has no leader.
+      member.isLeader = false;
       await member.save();
 
-      // Decrement old group.
       await Group.updateOne({ _id: oldGroupId }, { $inc: { memberCount: -1 } });
 
-      // Reconcile both.
       await reconcileGroupLeader(oldGroupId);
       await reconcileGroupLeader(target._id);
     } else {
@@ -1633,7 +1557,6 @@ app.delete(
     await Member.deleteOne({ _id: member._id });
     await Group.updateOne({ _id: groupId }, { $inc: { memberCount: -1 } });
 
-    // If the deleted member was the leader, promote another.
     await reconcileGroupLeader(groupId);
 
     const freshGroup = await Group.findById(groupId);
@@ -1649,7 +1572,7 @@ app.delete(
 );
 
 // ============================================================================
-// SECTION 11 — EXPORT
+// SECTION 11 — CSV EXPORT
 // ============================================================================
 
 function csvEscape(value) {
@@ -1670,7 +1593,6 @@ app.get(
       .sort({ 'group.name': 1, createdAt: 1 })
       .lean();
 
-    // Sort by group name then createdAt in JS (Mongo can't sort across populate).
     members.sort((a, b) => {
       const ga = (a.group && a.group.name ? a.group.name : '').toLowerCase();
       const gb = (b.group && b.group.name ? b.group.name : '').toLowerCase();
@@ -1700,7 +1622,538 @@ app.get(
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.status(200).send('\uFEFF' + csv); // BOM for Excel
+    return res.status(200).send('\uFEFF' + csv);
+  })
+);
+
+// ============================================================================
+// SECTION 11B — PDF EXPORT (pdfkit)
+// ============================================================================
+
+const PDF_COLORS = {
+  primary: '#0b3d91',
+  primaryDark: '#093174',
+  accent: '#1e6fd9',
+  text: '#1f2937',
+  muted: '#6b7280',
+  border: '#e2e8f0',
+  rowAlt: '#f9fafc',
+  leaderBg: '#e7eefb',
+  white: '#ffffff',
+};
+
+const PDF_LAYOUT = Object.freeze({
+  pageSize: 'A4',
+  margin: 50,
+  footerHeight: 40,
+});
+
+function pdfFmtLong(d) {
+  try {
+    return new Date(d).toLocaleString('en-GB', {
+      day: '2-digit', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch (_) { return ''; }
+}
+
+/**
+ * Build a professional PDF from a list of groups with their members.
+ *
+ * groups shape:
+ *   [{
+ *     name, memberCount, capacity, leaderName, leaderRegNo,
+ *     members: [{ regNo, name, phone, isLeader, createdAt }]
+ *   }]
+ *
+ * Returns Promise<Buffer>.
+ */
+function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        size: PDF_LAYOUT.pageSize,
+        margins: {
+          top: PDF_LAYOUT.margin,
+          bottom: PDF_LAYOUT.margin + 20,
+          left: PDF_LAYOUT.margin,
+          right: PDF_LAYOUT.margin,
+        },
+        bufferPages: true,
+        autoFirstPage: false,
+        info: {
+          Title: reportTitle,
+          Author: 'Physics Education Groups',
+          Subject: 'Group Registry',
+          Creator: 'Physics Education Groups',
+        },
+      });
+
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', (err) => reject(err));
+
+      const pageWidth = doc.page.width;
+      const pageHeight = doc.page.height;
+      const contentWidth = pageWidth - PDF_LAYOUT.margin * 2;
+      const contentLeft = PDF_LAYOUT.margin;
+      const contentRight = pageWidth - PDF_LAYOUT.margin;
+
+      // Totals
+      const totals = groups.reduce(
+        (acc, g) => {
+          acc.groups += 1;
+          acc.members += (g.members || []).length;
+          acc.leaders += (g.members || []).filter((m) => m.isLeader).length;
+          return acc;
+        },
+        { groups: 0, members: 0, leaders: 0 }
+      );
+
+      // Column layout for member table
+      const rawCols = { idx: 28, regNo: 90, name: 165, phone: 100, role: 112 };
+      const totalRaw = rawCols.idx + rawCols.regNo + rawCols.name + rawCols.phone + rawCols.role;
+      const scale = contentWidth / totalRaw;
+      const colWidths = {
+        idx: rawCols.idx * scale,
+        regNo: rawCols.regNo * scale,
+        name: rawCols.name * scale,
+        phone: rawCols.phone * scale,
+        role: rawCols.role * scale,
+      };
+      const colX = {
+        idx: contentLeft,
+        regNo: contentLeft + colWidths.idx,
+        name: contentLeft + colWidths.idx + colWidths.regNo,
+        phone: contentLeft + colWidths.idx + colWidths.regNo + colWidths.name,
+        role:
+          contentLeft +
+          colWidths.idx +
+          colWidths.regNo +
+          colWidths.name +
+          colWidths.phone,
+      };
+
+      function drawPageHeader() {
+        doc.save();
+        doc.rect(0, 0, pageWidth, 92).fill(PDF_COLORS.primary);
+
+        doc.fillColor(PDF_COLORS.white).fontSize(20).font('Helvetica-Bold');
+        doc.text('PHYSICS EDUCATION GROUPS', PDF_LAYOUT.margin, 26, {
+          width: contentWidth,
+          align: 'left',
+          lineBreak: false,
+        });
+
+        doc.fontSize(9).font('Helvetica').fillColor('#cfdcf4');
+        doc.text(String(reportTitle || '').toUpperCase(), PDF_LAYOUT.margin, 54, {
+          width: contentWidth * 0.6,
+          align: 'left',
+          lineBreak: false,
+        });
+
+        doc.fontSize(8).font('Helvetica').fillColor('#cfdcf4');
+        doc.text(
+          'Generated: ' + pdfFmtLong(new Date()),
+          PDF_LAYOUT.margin + contentWidth * 0.6,
+          55,
+          { width: contentWidth * 0.4, align: 'right', lineBreak: false }
+        );
+
+        doc.restore();
+      }
+
+      doc.addPage();
+      drawPageHeader();
+
+      let y = 112;
+
+      if (reportSubtitle) {
+        doc.fontSize(10).font('Helvetica-Oblique').fillColor(PDF_COLORS.muted);
+        doc.text(reportSubtitle, contentLeft, y, { width: contentWidth, align: 'left' });
+        y += 16;
+      }
+
+      const summaryBoxHeight = 62;
+      doc.save();
+      doc
+        .roundedRect(contentLeft, y, contentWidth, summaryBoxHeight, 6)
+        .fillAndStroke('#f9fafc', PDF_COLORS.border);
+      doc.restore();
+
+      const summaryItems = [
+        { label: 'TOTAL GROUPS', value: String(totals.groups) },
+        { label: 'TOTAL MEMBERS', value: String(totals.members) },
+        { label: 'GROUP LEADERS', value: String(totals.leaders) },
+        { label: 'CAPACITY PER GROUP', value: String(CONFIG.MAX_GROUP_MEMBERS) },
+      ];
+      const itemWidth = contentWidth / summaryItems.length;
+      summaryItems.forEach((item, i) => {
+        const ix = contentLeft + i * itemWidth + 14;
+        doc.fontSize(7.5).font('Helvetica-Bold').fillColor(PDF_COLORS.muted);
+        doc.text(item.label, ix, y + 12, { width: itemWidth - 20, align: 'left' });
+        doc.fontSize(17).font('Helvetica-Bold').fillColor(PDF_COLORS.primary);
+        doc.text(item.value, ix, y + 26, { width: itemWidth - 20, align: 'left' });
+      });
+
+      y += summaryBoxHeight + 22;
+
+      function ensureSpace(needed) {
+        if (y + needed > pageHeight - PDF_LAYOUT.margin - PDF_LAYOUT.footerHeight + 10) {
+          doc.addPage();
+          drawPageHeader();
+          y = 112;
+        }
+      }
+
+      function drawGroupHeader(group, index) {
+        ensureSpace(80);
+
+        const headerHeight = 44;
+        doc.save();
+        doc
+          .roundedRect(contentLeft, y, contentWidth, headerHeight, 5)
+          .fillAndStroke(PDF_COLORS.leaderBg, PDF_COLORS.border);
+        doc.restore();
+
+        doc.save();
+        doc.circle(contentLeft + 24, y + headerHeight / 2, 13).fill(PDF_COLORS.primary);
+        doc.restore();
+        doc.fontSize(11).font('Helvetica-Bold').fillColor(PDF_COLORS.white);
+        doc.text(String(index), contentLeft + 18, y + headerHeight / 2 - 6, {
+          width: 12,
+          align: 'center',
+        });
+
+        doc.fontSize(13).font('Helvetica-Bold').fillColor(PDF_COLORS.primaryDark);
+        doc.text(group.name, contentLeft + 48, y + 8, {
+          width: contentWidth - 200,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.fontSize(8.5).font('Helvetica').fillColor(PDF_COLORS.muted);
+        const metaParts = [];
+        metaParts.push(`${(group.members || []).length} / ${group.capacity || 10} members`);
+        if (group.leaderName) {
+          metaParts.push(
+            `Leader: ${group.leaderName}${group.leaderRegNo ? ' (' + group.leaderRegNo + ')' : ''}`
+          );
+        }
+        doc.text(metaParts.join('   •   '), contentLeft + 48, y + 26, {
+          width: contentWidth - 60,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        const isFull = (group.members || []).length >= (group.capacity || 10);
+        const badgeText = isFull ? 'FULL' : 'OPEN';
+        const badgeBg = isFull ? '#b91c1c' : '#15803d';
+        const badgeWidth = 44;
+        const badgeX = contentRight - badgeWidth - 12;
+        doc.save();
+        doc.roundedRect(badgeX, y + 13, badgeWidth, 18, 9).fill(badgeBg);
+        doc.restore();
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(PDF_COLORS.white);
+        doc.text(badgeText, badgeX, y + 18, { width: badgeWidth, align: 'center' });
+
+        y += headerHeight + 8;
+
+        doc.save();
+        doc.rect(contentLeft, y, contentWidth, 22).fill(PDF_COLORS.primary);
+        doc.restore();
+
+        const headerY = y + 7;
+        doc.fontSize(8).font('Helvetica-Bold').fillColor(PDF_COLORS.white);
+        doc.text('#', colX.idx + 4, headerY, { width: colWidths.idx - 8, align: 'left', lineBreak: false });
+        doc.text('REG NO', colX.regNo + 6, headerY, { width: colWidths.regNo - 8, align: 'left', lineBreak: false });
+        doc.text('NAME', colX.name + 6, headerY, { width: colWidths.name - 8, align: 'left', lineBreak: false });
+        doc.text('PHONE NUMBER', colX.phone + 6, headerY, { width: colWidths.phone - 8, align: 'left', lineBreak: false });
+        doc.text('ROLE', colX.role + 6, headerY, { width: colWidths.role - 8, align: 'left', lineBreak: false });
+
+        y += 22;
+      }
+
+      function drawMemberRow(m, idx, isLeader) {
+        const rowHeight = 22;
+        ensureSpace(rowHeight + 2);
+
+        if (isLeader) {
+          doc.save();
+          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.leaderBg);
+          doc.restore();
+        } else if (idx % 2 === 1) {
+          doc.save();
+          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.rowAlt);
+          doc.restore();
+        }
+
+        if (isLeader) {
+          doc.save();
+          doc.rect(contentLeft, y, 3, rowHeight).fill(PDF_COLORS.accent);
+          doc.restore();
+        }
+
+        const cellY = y + 7;
+        doc.fontSize(9).font('Helvetica').fillColor(PDF_COLORS.text);
+        doc.text(String(idx), colX.idx + 4, cellY, {
+          width: colWidths.idx - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.font('Helvetica-Bold').fillColor(PDF_COLORS.primaryDark);
+        doc.text(m.regNo || '', colX.regNo + 6, cellY, {
+          width: colWidths.regNo - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.font(isLeader ? 'Helvetica-Bold' : 'Helvetica').fillColor(PDF_COLORS.text);
+        doc.text(m.name || '', colX.name + 6, cellY, {
+          width: colWidths.name - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.font('Helvetica').fillColor(PDF_COLORS.text);
+        doc.text(m.phone || '', colX.phone + 6, cellY, {
+          width: colWidths.phone - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        if (isLeader) {
+          doc.font('Helvetica-Bold').fillColor(PDF_COLORS.primary);
+          doc.text('GROUP LEADER', colX.role + 6, cellY, {
+            width: colWidths.role - 8,
+            align: 'left',
+            lineBreak: false,
+            ellipsis: true,
+          });
+        } else {
+          doc.font('Helvetica').fillColor(PDF_COLORS.muted);
+          doc.text('MEMBER', colX.role + 6, cellY, {
+            width: colWidths.role - 8,
+            align: 'left',
+            lineBreak: false,
+            ellipsis: true,
+          });
+        }
+
+        doc.save();
+        doc
+          .moveTo(contentLeft, y + rowHeight)
+          .lineTo(contentRight, y + rowHeight)
+          .strokeColor(PDF_COLORS.border)
+          .lineWidth(0.4)
+          .stroke();
+        doc.restore();
+
+        y += rowHeight;
+      }
+
+      if (groups.length === 0) {
+        doc.fontSize(11).font('Helvetica-Oblique').fillColor(PDF_COLORS.muted);
+        doc.text('No groups have been registered yet.', contentLeft, y + 20, {
+          width: contentWidth,
+          align: 'center',
+        });
+      } else {
+        groups.forEach((group, gi) => {
+          drawGroupHeader(group, gi + 1);
+
+          const members = group.members || [];
+          if (members.length === 0) {
+            const emptyHeight = 26;
+            doc.save();
+            doc
+              .rect(contentLeft, y, contentWidth, emptyHeight)
+              .fillAndStroke('#fdf6e3', '#f2dfa4');
+            doc.restore();
+            doc.fontSize(9).font('Helvetica-Oblique').fillColor('#a16207');
+            doc.text('No members in this group yet.', contentLeft + 8, y + 8, {
+              width: contentWidth - 16,
+              align: 'left',
+            });
+            y += emptyHeight;
+          } else {
+            members.forEach((m, mi) => {
+              drawMemberRow(m, mi + 1, Boolean(m.isLeader));
+            });
+          }
+
+          y += 18;
+        });
+      }
+
+      // Footers on every page
+      const range = doc.bufferedPageRange();
+      const totalPages = range.count;
+      for (let i = 0; i < totalPages; i++) {
+        doc.switchToPage(range.start + i);
+        const footerY = pageHeight - 40;
+
+        doc.save();
+        doc
+          .moveTo(contentLeft, footerY - 8)
+          .lineTo(contentRight, footerY - 8)
+          .strokeColor(PDF_COLORS.border)
+          .lineWidth(0.5)
+          .stroke();
+        doc.restore();
+
+        doc.fontSize(7.5).font('Helvetica').fillColor(PDF_COLORS.muted);
+        doc.text(
+          'Physics Education Groups  •  Confidential administrative document',
+          contentLeft,
+          footerY,
+          { width: contentWidth * 0.7, align: 'left', lineBreak: false }
+        );
+        doc.text(
+          `Page ${i + 1} of ${totalPages}`,
+          contentLeft + contentWidth * 0.7,
+          footerY,
+          { width: contentWidth * 0.3, align: 'right', lineBreak: false }
+        );
+      }
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// ---------- Admin PDF: all groups ----------
+app.get(
+  '/api/admin/export/pdf',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const groups = await Group.find().lean();
+
+    const allLeaders = await Member.find({ isLeader: true })
+      .select('regNo name group')
+      .lean();
+    const leadersByGroup = {};
+    for (const l of allLeaders) {
+      leadersByGroup[String(l.group)] = { regNo: l.regNo, name: l.name };
+    }
+
+    // Sort groups alphabetically by display name (case-insensitive)
+    groups.sort((a, b) =>
+      String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
+    );
+
+    const groupsWithMembers = [];
+    for (const g of groups) {
+      const members = await Member.find({ group: g._id })
+        .sort({ isLeader: -1, createdAt: 1, _id: 1 })
+        .select('regNo name phone isLeader createdAt')
+        .lean();
+      const leader = leadersByGroup[String(g._id)] || null;
+      groupsWithMembers.push({
+        id: String(g._id),
+        name: g.name,
+        memberCount: g.memberCount,
+        capacity: CONFIG.MAX_GROUP_MEMBERS,
+        leaderName: leader ? leader.name : null,
+        leaderRegNo: leader ? leader.regNo : null,
+        members: members.map((m) => ({
+          regNo: m.regNo,
+          name: m.name,
+          phone: m.phone,
+          isLeader: Boolean(m.isLeader),
+          createdAt: m.createdAt,
+        })),
+      });
+    }
+
+    const pdfBuffer = await buildGroupsPdf({
+      groups: groupsWithMembers,
+      reportTitle: 'Complete Group Registry',
+      reportSubtitle: `All Physics Education groups and their members (${groupsWithMembers.length} group${
+        groupsWithMembers.length === 1 ? '' : 's'
+      }).`,
+    });
+
+    const filename = `physics-education-groups-complete-${new Date()
+      .toISOString()
+      .slice(0, 10)}.pdf`;
+
+    console.log(
+      `[admin] PDF export generated (${groupsWithMembers.length} groups, ${pdfBuffer.length} bytes)`
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', String(pdfBuffer.length));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).end(pdfBuffer);
+  })
+);
+
+// ---------- Member PDF: own group only ----------
+app.get(
+  '/api/member/export/pdf',
+  requireMember,
+  asyncHandler(async (req, res) => {
+    const member = await Member.findById(req._session.subjectId);
+    if (!member) {
+      return fail(res, 'Session invalid.', 'SESSION_INVALID', 401);
+    }
+    const group = await Group.findById(member.group);
+    if (!group) {
+      return fail(res, 'Group not found.', 'NOT_FOUND', 404);
+    }
+
+    const members = await Member.find({ group: group._id })
+      .sort({ isLeader: -1, createdAt: 1, _id: 1 })
+      .select('regNo name phone isLeader createdAt')
+      .lean();
+
+    const leader = members.find((m) => m.isLeader) || null;
+
+    const pdfBuffer = await buildGroupsPdf({
+      groups: [
+        {
+          id: String(group._id),
+          name: group.name,
+          memberCount: group.memberCount,
+          capacity: CONFIG.MAX_GROUP_MEMBERS,
+          leaderName: leader ? leader.name : null,
+          leaderRegNo: leader ? leader.regNo : null,
+          members: members.map((m) => ({
+            regNo: m.regNo,
+            name: m.name,
+            phone: m.phone,
+            isLeader: Boolean(m.isLeader),
+            createdAt: m.createdAt,
+          })),
+        },
+      ],
+      reportTitle: 'Group Member Directory',
+      reportSubtitle: `Group roster for "${group.name}".`,
+    });
+
+    const safeName =
+      group.name.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'group';
+    const filename = `physics-group-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+    console.log(`[member] PDF export generated for group "${group.name}" (${pdfBuffer.length} bytes)`);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', String(pdfBuffer.length));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).end(pdfBuffer);
   })
 );
 
@@ -1775,24 +2228,20 @@ app.use((req, res) => {
   return res.status(404).send('Not found');
 });
 
-// Centralized error handler — never leak internals.
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
 
-  // Known app errors → safe to expose.
   if (err instanceof AppError) {
     console.warn(`[error] ${err.code}: ${err.message}`);
     return fail(res, err.message, err.code, err.status);
   }
 
-  // Mongoose validation errors.
   if (err && err.name === 'ValidationError') {
     const first = Object.values(err.errors)[0];
     console.warn('[error] ValidationError:', first ? first.message : err.message);
     return fail(res, first ? first.message : 'Validation error.', 'VALIDATION', 400);
   }
 
-  // Duplicate key.
   if (err && err.code === 11000) {
     console.warn('[error] Duplicate key:', JSON.stringify(err.keyPattern || {}));
     const keys = err.keyPattern || {};
@@ -1802,12 +2251,10 @@ app.use((err, req, res, next) => {
     return fail(res, 'Duplicate value.', 'DUPLICATE', 409);
   }
 
-  // CastError (bad ObjectId, etc.).
   if (err && err.name === 'CastError') {
     return fail(res, 'Invalid identifier.', 'INVALID_ID', 400);
   }
 
-  // Unknown error — log full stack on server, return generic message.
   console.error('[error] Unhandled:', err && err.stack ? err.stack : err);
   return fail(
     res,
@@ -1872,7 +2319,6 @@ process.on('uncaughtException', (err) => {
   console.error('[process] Uncaught exception:', err && err.stack ? err.stack : err);
 });
 
-// Only auto-start when run directly (not when imported for tests).
 if (require.main === module) {
   start();
 }
