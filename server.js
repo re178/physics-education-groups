@@ -4,24 +4,25 @@
  * ============================================================================
  * PHYSICS EDUCATION GROUPS — Complete Backend (server.js)
  * ============================================================================
+ * Version: 1.1.1
  *
- * This single file contains the ENTIRE backend:
- *
+ * Sections:
  *   1. Environment loading + validation
- *   2. MongoDB / Mongoose connection (with retry, index sync, shutdown)
- *   3. Mongoose models: Group, Member, Admin, AdminSession
- *   4. Utilities: normalization, validation, phone, password hashing
- *   5. Middleware: Helmet, CORS, rate limiting, CSRF, auth, error handler
- *   6. Services: registration, group ops, member ops, admin ops, export
- *   7. Routes: public, member, admin, SSE events
- *   8. PDF export (pdfkit) for admin (all groups) and member (own group)
- *   9. Static file serving for /public
- *  10. Graceful startup and shutdown
- *
- * No frameworks beyond Express. No React. No Firebase. No MySQL.
- * Deployable to Render with `npm start`.
- *
- * Author: Physics Education Groups
+ *   2. Utilities (normalization, validation, hashing)
+ *   3. MongoDB / Mongoose connection
+ *   4. Mongoose models: Group, Member, Admin, AdminSession
+ *   5. Business helpers (leader reconciliation, shapers)
+ *   6. Server-Sent Events (live admin dashboard)
+ *   7. App + middleware (Helmet, CORS, rate limits, CSRF, auth)
+ *   8. Public routes
+ *   9. Member routes
+ *  10. Admin routes
+ *  11. CSV export
+ *  11B. PDF export (pdfkit) — fixed page-dimension order
+ *  12. SSE endpoint
+ *  13. Static files + page routes
+ *  14. 404 + error handlers
+ *  15. Startup + graceful shutdown
  * ============================================================================
  */
 
@@ -140,7 +141,7 @@ const CONFIG = Object.freeze({
 console.log(`[boot] Physics Education Groups starting in ${NODE_ENV} mode on port ${PORT}.`);
 
 // ============================================================================
-// SECTION 2 — UTILITIES (normalization, validation, hashing)
+// SECTION 2 — UTILITIES
 // ============================================================================
 
 function normalizeGroupName(raw) {
@@ -385,7 +386,6 @@ async function disconnectDatabase() {
 // SECTION 4 — MODELS
 // ============================================================================
 
-// ---------- Group ----------
 const GroupSchema = new mongoose.Schema(
   {
     name: {
@@ -428,7 +428,6 @@ GroupSchema.set('toObject', { virtuals: true });
 
 const Group = mongoose.model('Group', GroupSchema);
 
-// ---------- Member ----------
 const DeviceMetadataSchema = new mongoose.Schema(
   {
     userAgent: { type: String, default: '', maxlength: 500 },
@@ -526,7 +525,6 @@ MemberSchema.index({ group: 1, isLeader: -1, createdAt: 1 });
 
 const Member = mongoose.model('Member', MemberSchema);
 
-// ---------- Admin ----------
 const AdminSchema = new mongoose.Schema(
   {
     username: {
@@ -549,7 +547,6 @@ const AdminSchema = new mongoose.Schema(
 
 const Admin = mongoose.model('Admin', AdminSchema);
 
-// ---------- AdminSession ----------
 const AdminSessionSchema = new mongoose.Schema(
   {
     token: {
@@ -655,7 +652,7 @@ function shapeMember(member) {
 }
 
 // ============================================================================
-// SECTION 6 — SSE (Server-Sent Events for live admin dashboard)
+// SECTION 6 — SSE
 // ============================================================================
 
 const sseClients = new Set();
@@ -820,7 +817,7 @@ app.get('/api/health', (req, res) => {
     uptime: Math.floor(process.uptime()),
     db: states[mongoose.connection.readyState] || 'unknown',
     transactions: supportsTransactions,
-    version: '1.1.0',
+    version: '1.1.1',
   });
 });
 
@@ -1648,6 +1645,9 @@ const PDF_LAYOUT = Object.freeze({
   footerHeight: 40,
 });
 
+const A4_WIDTH = 595.28;
+const A4_HEIGHT = 841.89;
+
 function pdfFmtLong(d) {
   try {
     return new Date(d).toLocaleString('en-GB', {
@@ -1657,17 +1657,6 @@ function pdfFmtLong(d) {
   } catch (_) { return ''; }
 }
 
-/**
- * Build a professional PDF from a list of groups with their members.
- *
- * groups shape:
- *   [{
- *     name, memberCount, capacity, leaderName, leaderRegNo,
- *     members: [{ regNo, name, phone, isLeader, createdAt }]
- *   }]
- *
- * Returns Promise<Buffer>.
- */
 function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
   return new Promise((resolve, reject) => {
     try {
@@ -1694,13 +1683,15 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', (err) => reject(err));
 
-      const pageWidth = doc.page.width;
-      const pageHeight = doc.page.height;
+      // Add first page BEFORE reading page dimensions.
+      doc.addPage();
+
+      const pageWidth = (doc.page && doc.page.width) || A4_WIDTH;
+      const pageHeight = (doc.page && doc.page.height) || A4_HEIGHT;
       const contentWidth = pageWidth - PDF_LAYOUT.margin * 2;
       const contentLeft = PDF_LAYOUT.margin;
       const contentRight = pageWidth - PDF_LAYOUT.margin;
 
-      // Totals
       const totals = groups.reduce(
         (acc, g) => {
           acc.groups += 1;
@@ -1711,7 +1702,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         { groups: 0, members: 0, leaders: 0 }
       );
 
-      // Column layout for member table
       const rawCols = { idx: 28, regNo: 90, name: 165, phone: 100, role: 112 };
       const totalRaw = rawCols.idx + rawCols.regNo + rawCols.name + rawCols.phone + rawCols.role;
       const scale = contentWidth / totalRaw;
@@ -1738,21 +1728,18 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       function drawPageHeader() {
         doc.save();
         doc.rect(0, 0, pageWidth, 92).fill(PDF_COLORS.primary);
-
         doc.fillColor(PDF_COLORS.white).fontSize(20).font('Helvetica-Bold');
         doc.text('PHYSICS EDUCATION GROUPS', PDF_LAYOUT.margin, 26, {
           width: contentWidth,
           align: 'left',
           lineBreak: false,
         });
-
         doc.fontSize(9).font('Helvetica').fillColor('#cfdcf4');
         doc.text(String(reportTitle || '').toUpperCase(), PDF_LAYOUT.margin, 54, {
           width: contentWidth * 0.6,
           align: 'left',
           lineBreak: false,
         });
-
         doc.fontSize(8).font('Helvetica').fillColor('#cfdcf4');
         doc.text(
           'Generated: ' + pdfFmtLong(new Date()),
@@ -1760,11 +1747,9 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           55,
           { width: contentWidth * 0.4, align: 'right', lineBreak: false }
         );
-
         doc.restore();
       }
 
-      doc.addPage();
       drawPageHeader();
 
       let y = 112;
@@ -2037,96 +2022,32 @@ app.get(
   '/api/admin/export/pdf',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const groups = await Group.find().lean();
+    try {
+      const groups = await Group.find().lean();
 
-    const allLeaders = await Member.find({ isLeader: true })
-      .select('regNo name group')
-      .lean();
-    const leadersByGroup = {};
-    for (const l of allLeaders) {
-      leadersByGroup[String(l.group)] = { regNo: l.regNo, name: l.name };
-    }
-
-    // Sort groups alphabetically by display name (case-insensitive)
-    groups.sort((a, b) =>
-      String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
-    );
-
-    const groupsWithMembers = [];
-    for (const g of groups) {
-      const members = await Member.find({ group: g._id })
-        .sort({ isLeader: -1, createdAt: 1, _id: 1 })
-        .select('regNo name phone isLeader createdAt')
+      const allLeaders = await Member.find({ isLeader: true })
+        .select('regNo name group')
         .lean();
-      const leader = leadersByGroup[String(g._id)] || null;
-      groupsWithMembers.push({
-        id: String(g._id),
-        name: g.name,
-        memberCount: g.memberCount,
-        capacity: CONFIG.MAX_GROUP_MEMBERS,
-        leaderName: leader ? leader.name : null,
-        leaderRegNo: leader ? leader.regNo : null,
-        members: members.map((m) => ({
-          regNo: m.regNo,
-          name: m.name,
-          phone: m.phone,
-          isLeader: Boolean(m.isLeader),
-          createdAt: m.createdAt,
-        })),
-      });
-    }
+      const leadersByGroup = {};
+      for (const l of allLeaders) {
+        leadersByGroup[String(l.group)] = { regNo: l.regNo, name: l.name };
+      }
 
-    const pdfBuffer = await buildGroupsPdf({
-      groups: groupsWithMembers,
-      reportTitle: 'Complete Group Registry',
-      reportSubtitle: `All Physics Education groups and their members (${groupsWithMembers.length} group${
-        groupsWithMembers.length === 1 ? '' : 's'
-      }).`,
-    });
+      groups.sort((a, b) =>
+        String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
+      );
 
-    const filename = `physics-education-groups-complete-${new Date()
-      .toISOString()
-      .slice(0, 10)}.pdf`;
-
-    console.log(
-      `[admin] PDF export generated (${groupsWithMembers.length} groups, ${pdfBuffer.length} bytes)`
-    );
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', String(pdfBuffer.length));
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).end(pdfBuffer);
-  })
-);
-
-// ---------- Member PDF: own group only ----------
-app.get(
-  '/api/member/export/pdf',
-  requireMember,
-  asyncHandler(async (req, res) => {
-    const member = await Member.findById(req._session.subjectId);
-    if (!member) {
-      return fail(res, 'Session invalid.', 'SESSION_INVALID', 401);
-    }
-    const group = await Group.findById(member.group);
-    if (!group) {
-      return fail(res, 'Group not found.', 'NOT_FOUND', 404);
-    }
-
-    const members = await Member.find({ group: group._id })
-      .sort({ isLeader: -1, createdAt: 1, _id: 1 })
-      .select('regNo name phone isLeader createdAt')
-      .lean();
-
-    const leader = members.find((m) => m.isLeader) || null;
-
-    const pdfBuffer = await buildGroupsPdf({
-      groups: [
-        {
-          id: String(group._id),
-          name: group.name,
-          memberCount: group.memberCount,
+      const groupsWithMembers = [];
+      for (const g of groups) {
+        const members = await Member.find({ group: g._id })
+          .sort({ isLeader: -1, createdAt: 1, _id: 1 })
+          .select('regNo name phone isLeader createdAt')
+          .lean();
+        const leader = leadersByGroup[String(g._id)] || null;
+        groupsWithMembers.push({
+          id: String(g._id),
+          name: g.name,
+          memberCount: g.memberCount,
           capacity: CONFIG.MAX_GROUP_MEMBERS,
           leaderName: leader ? leader.name : null,
           leaderRegNo: leader ? leader.regNo : null,
@@ -2137,23 +2058,96 @@ app.get(
             isLeader: Boolean(m.isLeader),
             createdAt: m.createdAt,
           })),
-        },
-      ],
-      reportTitle: 'Group Member Directory',
-      reportSubtitle: `Group roster for "${group.name}".`,
-    });
+        });
+      }
 
-    const safeName =
-      group.name.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'group';
-    const filename = `physics-group-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const pdfBuffer = await buildGroupsPdf({
+        groups: groupsWithMembers,
+        reportTitle: 'Complete Group Registry',
+        reportSubtitle: `All Physics Education groups and their members (${groupsWithMembers.length} group${
+          groupsWithMembers.length === 1 ? '' : 's'
+        }).`,
+      });
 
-    console.log(`[member] PDF export generated for group "${group.name}" (${pdfBuffer.length} bytes)`);
+      const filename = `physics-education-groups-complete-${new Date()
+        .toISOString()
+        .slice(0, 10)}.pdf`;
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', String(pdfBuffer.length));
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).end(pdfBuffer);
+      console.log(
+        `[admin] PDF export generated (${groupsWithMembers.length} groups, ${pdfBuffer.length} bytes)`
+      );
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', String(pdfBuffer.length));
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).end(pdfBuffer);
+    } catch (pdfErr) {
+      console.error('[admin-pdf] ERROR:', pdfErr && pdfErr.stack ? pdfErr.stack : pdfErr);
+      throw pdfErr;
+    }
+  })
+);
+
+// ---------- Member PDF: own group only ----------
+app.get(
+  '/api/member/export/pdf',
+  requireMember,
+  asyncHandler(async (req, res) => {
+    try {
+      const member = await Member.findById(req._session.subjectId);
+      if (!member) {
+        return fail(res, 'Session invalid.', 'SESSION_INVALID', 401);
+      }
+      const group = await Group.findById(member.group);
+      if (!group) {
+        return fail(res, 'Group not found.', 'NOT_FOUND', 404);
+      }
+
+      const members = await Member.find({ group: group._id })
+        .sort({ isLeader: -1, createdAt: 1, _id: 1 })
+        .select('regNo name phone isLeader createdAt')
+        .lean();
+
+      const leader = members.find((m) => m.isLeader) || null;
+
+      const pdfBuffer = await buildGroupsPdf({
+        groups: [
+          {
+            id: String(group._id),
+            name: group.name,
+            memberCount: group.memberCount,
+            capacity: CONFIG.MAX_GROUP_MEMBERS,
+            leaderName: leader ? leader.name : null,
+            leaderRegNo: leader ? leader.regNo : null,
+            members: members.map((m) => ({
+              regNo: m.regNo,
+              name: m.name,
+              phone: m.phone,
+              isLeader: Boolean(m.isLeader),
+              createdAt: m.createdAt,
+            })),
+          },
+        ],
+        reportTitle: 'Group Member Directory',
+        reportSubtitle: `Group roster for "${group.name}".`,
+      });
+
+      const safeName =
+        group.name.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'group';
+      const filename = `physics-group-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+      console.log(`[member] PDF export generated for group "${group.name}" (${pdfBuffer.length} bytes)`);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', String(pdfBuffer.length));
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).end(pdfBuffer);
+    } catch (pdfErr) {
+      console.error('[member-pdf] ERROR:', pdfErr && pdfErr.stack ? pdfErr.stack : pdfErr);
+      throw pdfErr;
+    }
   })
 );
 
