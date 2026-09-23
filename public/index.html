@@ -11,6 +11,9 @@
 </head>
 <body class="page page-register">
 
+<!-- ============================================================ -->
+<!-- HEADER                                                       -->
+<!-- ============================================================ -->
 <header class="site-header">
   <div class="container header-inner">
     <a class="brand" href="/">
@@ -27,19 +30,77 @@
   </div>
 </header>
 
+<!-- ============================================================ -->
+<!-- MAIN                                                         -->
+<!-- ============================================================ -->
 <main class="container main-content">
 
+  <!-- Hero -->
   <section class="hero">
     <h1>Join a Physics Education Group</h1>
     <p class="hero-sub">
       Register below to be added to your group. Each group holds a
-      maximum of <strong>10 members</strong>. The first member of a
-      new group automatically becomes the <strong>Group Leader</strong>.
+      maximum of <strong id="hero-capacity">10 members</strong>. The first
+      member of a new group automatically becomes the
+      <strong>Group Leader</strong>.
     </p>
   </section>
 
+  <!-- Alert region -->
   <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
 
+  <!-- ============================================================ -->
+  <!-- PAYMENT CARD (hidden by default; shown by app.js only when  -->
+  <!-- the admin has switched payment-proof mode ON)                -->
+  <!-- ============================================================ -->
+  <section
+    id="payment-card"
+    class="card card-info"
+    hidden
+    aria-labelledby="payment-title"
+  >
+    <div class="card-head">
+      <h2 id="payment-title">Lab Manual Payment Required</h2>
+      <p class="muted">
+        Please complete the payment below so your Lab Manual can be prepared.
+      </p>
+    </div>
+
+    <div class="payment-body">
+      <div class="payment-instructions">
+        <p>
+          <strong>Send KSH <span id="payment-amount">45</span></strong> via
+          M-Pesa to:
+        </p>
+        <p class="payment-phone-line">
+          <span class="payment-phone" id="payment-phone">0741742291</span>
+          <span class="muted small">(Pochi la Biashara)</span>
+        </p>
+
+        <div class="payment-note-box">
+          <p class="payment-note-title">⚠️ Important — Write these down:</p>
+          <ul class="payment-note-list">
+            <li>The <strong>time</strong> you paid</li>
+            <li>The <strong>day/date</strong> you paid</li>
+            <li>The <strong>M-Pesa confirmation code</strong> you receive by SMS</li>
+          </ul>
+          <p class="small">
+            You will use these details to <strong>collect your Lab Manual</strong>.
+            Keep the SMS safe.
+          </p>
+        </div>
+
+        <p class="muted small">
+          After paying, paste your M-Pesa confirmation code and note the time
+          and day in the fields below, then submit the registration form.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- REGISTRATION CARD                                            -->
+  <!-- ============================================================ -->
   <section class="card" aria-labelledby="reg-title">
     <div class="card-head">
       <h2 id="reg-title">Student Registration</h2>
@@ -47,6 +108,7 @@
     </div>
 
     <form id="register-form" class="form" novalidate autocomplete="on">
+      <!-- Registration Number -->
       <div class="field">
         <label for="regNo">Registration Number <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -69,6 +131,7 @@
         <p class="field-error" data-error-for="regNo" hidden></p>
       </div>
 
+      <!-- Full Name -->
       <div class="field">
         <label for="name">Full Name <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -84,6 +147,7 @@
         <p class="field-error" data-error-for="name" hidden></p>
       </div>
 
+      <!-- Phone -->
       <div class="field">
         <label for="phone">Phone Number <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -103,6 +167,7 @@
         <p class="field-error" data-error-for="phone" hidden></p>
       </div>
 
+      <!-- Group Name -->
       <div class="field">
         <label for="groupName">Group Name <span class="req" aria-hidden="true">*</span></label>
         <input
@@ -122,9 +187,57 @@
         <p class="field-error" data-error-for="groupName" hidden></p>
       </div>
 
+      <!-- ============================================================ -->
+      <!-- PAYMENT FIELDS (hidden by default — revealed by app.js when -->
+      <!-- payment proof mode is ON)                                    -->
+      <!-- ============================================================ -->
+      <div class="field" id="field-mpesa" hidden>
+        <label for="mpesaCode">
+          M-Pesa Confirmation Code <span class="req" aria-hidden="true">*</span>
+        </label>
+        <input
+          id="mpesaCode"
+          name="mpesaCode"
+          type="text"
+          inputmode="text"
+          autocomplete="off"
+          spellcheck="false"
+          autocapitalize="characters"
+          maxlength="10"
+          minlength="10"
+          placeholder="e.g. QJ71X2Y3Z4"
+          aria-describedby="mpesa-help"
+        />
+        <p id="mpesa-help" class="help">
+          10 characters, from the M-Pesa SMS you received after paying.
+        </p>
+        <p class="field-error" data-error-for="mpesaCode" hidden></p>
+      </div>
+
+      <div class="field" id="field-payment-note" hidden>
+        <label for="paymentNote">
+          Time &amp; Day you paid <span class="req" aria-hidden="true">*</span>
+        </label>
+        <input
+          id="paymentNote"
+          name="paymentNote"
+          type="text"
+          autocomplete="off"
+          maxlength="200"
+          placeholder="e.g. Paid on Monday 23 Sept at 3:45 PM"
+          aria-describedby="payment-note-help"
+        />
+        <p id="payment-note-help" class="help">
+          Note it down carefully — you will use this to collect your Lab Manual.
+        </p>
+        <p class="field-error" data-error-for="paymentNote" hidden></p>
+      </div>
+
+      <!-- Hidden device metadata -->
       <input type="hidden" id="deviceId" name="deviceId" value="" />
       <input type="hidden" id="deviceMetadata" name="deviceMetadata" value="" />
 
+      <!-- Submit -->
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" id="submit-btn">
           <span class="btn-label">SUBMIT REGISTRATION</span>
@@ -142,6 +255,9 @@
     </form>
   </section>
 
+  <!-- ============================================================ -->
+  <!-- SUCCESS CARD (hidden until success)                          -->
+  <!-- ============================================================ -->
   <section id="success-card" class="card card-success" hidden aria-labelledby="success-title">
     <div class="card-head">
       <h2 id="success-title">Registration successful</h2>
@@ -149,6 +265,26 @@
     <div class="success-body">
       <p id="success-message" class="success-message"></p>
       <dl class="kv" id="success-details"></dl>
+
+      <!-- ============================================================ -->
+      <!-- PERSISTENT NOTICE — always visible after success             -->
+      <!-- Tells the student that Lab Manuals are available and how to  -->
+      <!-- collect them (by showing time & day of payment).             -->
+      <!-- ============================================================ -->
+      <div class="lab-manual-notice" id="lab-manual-notice">
+        <h3 class="lab-manual-title">📘 Lab Manuals are available</h3>
+        <p>
+          Your Lab Manual is now ready for collection. To pick it up, simply
+          <strong>show the time and day you paid</strong> for it, or your
+          <strong>M-Pesa confirmation code</strong>, to the Administrator.
+        </p>
+        <p class="muted small">
+          Keep the M-Pesa SMS on your phone until you have received your Lab
+          Manual. If you have not yet paid, please do so and contact the
+          Administrator.
+        </p>
+      </div>
+
       <div class="form-actions">
         <a class="btn btn-primary" id="success-login-link" href="/member-login">
           Go to Member Login
@@ -157,6 +293,7 @@
           Register another (different device)
         </button>
       </div>
+
       <p class="muted small">
         Note: the same device cannot submit two registrations. If you need to
         register another student, use a different device or contact the
@@ -165,6 +302,9 @@
     </div>
   </section>
 
+  <!-- ============================================================ -->
+  <!-- HOW IT WORKS                                                 -->
+  <!-- ============================================================ -->
   <section class="card card-info" aria-labelledby="how-title">
     <div class="card-head">
       <h2 id="how-title">How it works</h2>
@@ -185,9 +325,15 @@
         group automatically becomes the Group Leader.
       </li>
       <li>
-        <strong>Capacity.</strong> Each group holds at most 10 members. If
-        your chosen group is full, you will be asked to pick another group or
-        contact the Administrator.
+        <strong>Capacity.</strong> Each group holds a limited number of
+        members. If your chosen group is full, you will be asked to pick
+        another group or contact the Administrator.
+      </li>
+      <li>
+        <strong>Lab Manuals.</strong> Once your registration is accepted,
+        your Lab Manual is available for collection. Show the
+        <strong>time and day you paid</strong> (or your M-Pesa code) to
+        receive it.
       </li>
       <li>
         <strong>Login later.</strong> After registering, log in with your
@@ -199,10 +345,13 @@
 
 </main>
 
+<!-- ============================================================ -->
+<!-- FOOTER                                                       -->
+<!-- ============================================================ -->
 <footer class="site-footer">
   <div class="container footer-inner">
     <p>© <span id="footer-year"></span> Physics Education Groups. All rights reserved.</p>
-    <p class="muted small">build by physics representatives.</p>
+    <p class="muted small">Built with Node.js, Express, MongoDB, and Vanilla JS.</p>
   </div>
 </footer>
 
