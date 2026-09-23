@@ -4,10 +4,19 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="theme-color" content="#0b3d91" />
-<meta name="description" content="Physics Education Groups — register into your Physics Education group. Maximum 10 members per group." />
+<meta name="description" content="Physics Education Groups — register into your Physics Education group." />
 <title>PHYSICS EDUCATION GROUPS — Register</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%9B%EF%B8%8F%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/style.css" />
+<style>
+  /* Safety net: ensures any element with the [hidden] attribute is
+     truly invisible and cannot be revealed by a class rule such as
+     `.card { display: block }`. This guarantees the payment proof
+     section stays hidden on the public site unless app.js explicitly
+     removes the hidden attribute (which it only does when the admin
+     has switched payment proof ON). */
+  [hidden] { display: none !important; }
+</style>
 </head>
 <body class="page page-register">
 
@@ -30,9 +39,6 @@
   </div>
 </header>
 
-<!-- ============================================================ -->
-<!-- MAIN                                                         -->
-<!-- ============================================================ -->
 <main class="container main-content">
 
   <!-- Hero -->
@@ -50,8 +56,9 @@
   <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <!-- ============================================================ -->
-  <!-- PAYMENT CARD (hidden by default; shown by app.js only when  -->
-  <!-- the admin has switched payment-proof mode ON)                -->
+  <!-- PAYMENT CARD — HIDDEN BY DEFAULT.                            -->
+  <!-- Only revealed by app.js when /api/payment-config returns     -->
+  <!-- requirePaymentProof === true.                                -->
   <!-- ============================================================ -->
   <section
     id="payment-card"
@@ -188,8 +195,8 @@
       </div>
 
       <!-- ============================================================ -->
-      <!-- PAYMENT FIELDS (hidden by default — revealed by app.js when -->
-      <!-- payment proof mode is ON)                                    -->
+      <!-- PAYMENT FIELDS — HIDDEN BY DEFAULT.                          -->
+      <!-- Only revealed by app.js when payment proof mode is ON.       -->
       <!-- ============================================================ -->
       <div class="field" id="field-mpesa" hidden>
         <label for="mpesaCode">
@@ -256,7 +263,7 @@
   </section>
 
   <!-- ============================================================ -->
-  <!-- SUCCESS CARD (hidden until success)                          -->
+  <!-- SUCCESS CARD                                                 -->
   <!-- ============================================================ -->
   <section id="success-card" class="card card-success" hidden aria-labelledby="success-title">
     <div class="card-head">
@@ -266,11 +273,8 @@
       <p id="success-message" class="success-message"></p>
       <dl class="kv" id="success-details"></dl>
 
-      <!-- ============================================================ -->
-      <!-- PERSISTENT NOTICE — always visible after success             -->
-      <!-- Tells the student that Lab Manuals are available and how to  -->
-      <!-- collect them (by showing time & day of payment).             -->
-      <!-- ============================================================ -->
+      <!-- Persistent notice — always visible after a successful
+           submission, independent of payment mode. -->
       <div class="lab-manual-notice" id="lab-manual-notice">
         <h3 class="lab-manual-title">📘 Lab Manuals are available</h3>
         <p>
@@ -345,13 +349,10 @@
 
 </main>
 
-<!-- ============================================================ -->
-<!-- FOOTER                                                       -->
-<!-- ============================================================ -->
 <footer class="site-footer">
   <div class="container footer-inner">
     <p>© <span id="footer-year"></span> Physics Education Groups. All rights reserved.</p>
-    <p class="muted small">PHYSICS.</p>
+    <p class="muted small">Built with Node.js, Express, MongoDB, and Vanilla JS.</p>
   </div>
 </footer>
 
