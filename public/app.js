@@ -1,21 +1,16 @@
 /* ============================================================
  * PHYSICS EDUCATION GROUPS — public/app.js
  * ------------------------------------------------------------
- * All frontend behavior in one file:
- *   - Device fingerprint (persistent browser ID + metadata)
- *   - CSRF token fetching
- *   - API helper with JSON + error normalization
- *   - Registration form (index.html) with open/closed guard
- *   - Member login + dashboard (member.html)
- *   - Admin login + dashboard + group detail + SSE (admin.html)
- *   - Registration submissions toggle (admin)
- *   - Modal helpers, alerts, confirmations, CSV/PDF export
+ * Version: 1.4.0
  *
- * No framework. No build step. Pure browser JavaScript.
+ * Additions in this version:
+ *   - Runtime CSS injection (payment + settings + notice classes)
+ *   - Register page: payment-config check, dynamic field reveal
+ *   - Admin page: settings form, payment column, SSE settings sync
+ *   - Member modal: optional mpesaCode + paymentNote fields
+ *   - Dashboard stat tiles: paid / unpaid counts
  *
- * Auto-detects which page it's on and initializes it. No inline
- * scripts are required in the HTML files (they are blocked by
- * Helmet's Content-Security-Policy: scriptSrc 'self').
+ * All previously working features remain intact.
  * ============================================================ */
 'use strict';
 
@@ -29,7 +24,131 @@
   const CSRF_HEADER = 'X-CSRF-Token';
 
   /* ============================================================
-   * 1. Small utilities
+   * 1. Runtime style injection
+   * ------------------------------------------------------------
+   * We add the few new classes used by the payment + settings UI
+   * here, so that style.css does not need to be replaced.
+   * ============================================================ */
+  (function injectStyles() {
+    if (document.getElementById('peg-app-styles')) return;
+    const css = `
+      .submission-status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 32px;
+        align-items: center;
+      }
+      .submission-status-info {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        align-items: center;
+      }
+      .submission-status-label {
+        font-weight: 600;
+        color: #1f2937;
+        font-size: 0.9rem;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+      @media (min-width: 640px) {
+        .form-grid { grid-template-columns: 1fr 1fr; }
+      }
+      .span-full { grid-column: 1 / -1; }
+      .field-checkbox {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.95rem;
+      }
+      .checkbox-label input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        min-height: 0;
+        margin: 0;
+        accent-color: #0b3d91;
+        cursor: pointer;
+      }
+      .payment-body { display: flex; flex-direction: column; gap: 12px; }
+      .payment-instructions p { margin: 0 0 8px; }
+      .payment-phone-line { font-size: 1.05rem; }
+      .payment-phone {
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: 0.02em;
+        color: #0b3d91;
+      }
+      .payment-note-box {
+        background: #fef9c3;
+        border: 1px solid #fde68a;
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin: 12px 0;
+      }
+      .payment-note-title {
+        font-weight: 700;
+        color: #854d0e;
+        margin: 0 0 6px;
+      }
+      .payment-note-list {
+        margin: 0 0 8px 18px;
+        padding: 0;
+      }
+      .payment-note-list li { margin-bottom: 2px; }
+      .lab-manual-notice {
+        background: #e7eefb;
+        border: 1px solid #cfdcf4;
+        border-left: 4px solid #0b3d91;
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin: 8px 0;
+      }
+      .lab-manual-title {
+        margin: 0 0 6px;
+        color: #0b3d91;
+        font-size: 1.05rem;
+      }
+      .lab-manual-notice p {
+        margin: 0 0 6px;
+        font-size: 0.93rem;
+      }
+      .payment-cell { min-width: 100px; }
+      .payment-cell .badge { font-size: 0.68rem; }
+      .payment-cell .payment-mpesa-code {
+        display: block;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.7rem;
+        color: #6b7280;
+        margin-top: 2px;
+        word-break: break-all;
+      }
+      .payment-cell .payment-note-line {
+        display: block;
+        font-size: 0.72rem;
+        color: #6b7280;
+        margin-top: 2px;
+        white-space: normal;
+        word-break: break-word;
+      }
+    `;
+    const style = document.createElement('style');
+    style.id = 'peg-app-styles';
+    style.textContent = css;
+    document.head.appendChild(style);
+  })();
+
+  /* ============================================================
+   * 2. Small utilities
    * ============================================================ */
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -83,7 +202,7 @@
   };
 
   /* ============================================================
-   * 2. Device fingerprint (persistent per browser)
+   * 3. Device fingerprint (persistent per browser)
    * ============================================================ */
   const Device = (function () {
     const uuid = () => {
@@ -161,7 +280,7 @@
   })();
 
   /* ============================================================
-   * 3. Alerts
+   * 4. Alerts
    * ============================================================ */
   const Alert = (function () {
     const ICONS = {
@@ -229,7 +348,7 @@
   })();
 
   /* ============================================================
-   * 4. Modal helpers
+   * 5. Modal helpers
    * ============================================================ */
   const Modal = (function () {
     function open(id) {
@@ -306,7 +425,7 @@
   })();
 
   /* ============================================================
-   * 5. API helper (with CSRF)
+   * 6. API helper (with CSRF)
    * ============================================================ */
   let csrfTokenCache = null;
   let csrfFetchPromise = null;
@@ -403,7 +522,7 @@
   }
 
   /* ============================================================
-   * 6. Button loading helper
+   * 7. Button loading helper
    * ============================================================ */
   function withLoading(btn, asyncFn) {
     return async (...args) => {
@@ -421,7 +540,7 @@
   }
 
   /* ============================================================
-   * 7. Field-level error display
+   * 8. Field-level error display
    * ============================================================ */
   function setFieldError(fieldName, message) {
     const errNode = document.querySelector(`[data-error-for="${fieldName}"]`);
@@ -448,7 +567,7 @@
   }
 
   /* ============================================================
-   * 8. Show / hide password toggles
+   * 9. Show / hide password toggles
    * ============================================================ */
   function wireVisibilityToggles() {
     $$('[data-toggle-for]').forEach((btn) => {
@@ -465,7 +584,26 @@
   }
 
   /* ============================================================
-   * 9. REGISTRATION PAGE (index.html)
+   * 10. Payment cell renderer (used by admin tables)
+   * ============================================================ */
+  function buildPaymentCell(member) {
+    const td = el('td', { class: 'payment-cell' });
+    const code = member && member.mpesaCode ? String(member.mpesaCode) : '';
+
+    if (code) {
+      td.appendChild(el('span', { class: 'badge badge-open', text: 'PAID' }));
+      td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
+      if (member.paymentNote) {
+        td.appendChild(el('span', { class: 'payment-note-line', text: member.paymentNote }));
+      }
+    } else {
+      td.appendChild(el('span', { class: 'badge badge-member', text: 'UNPAID' }));
+    }
+    return td;
+  }
+
+  /* ============================================================
+   * 11. REGISTRATION PAGE (index.html)
    * ============================================================ */
   function initRegisterPage() {
     const form = document.getElementById('register-form');
@@ -479,27 +617,56 @@
     const submitBtn = document.getElementById('submit-btn');
     const successCard = document.getElementById('success-card');
 
-    // --------------------------------------------------------
-    // NEW: Check if registration is currently open.
-    // If closed, disable the form and show a clear notice.
-    // --------------------------------------------------------
-    let registrationOpen = true;
+    // Payment UI nodes
+    const paymentCard = document.getElementById('payment-card');
+    const paymentAmountSpan = document.getElementById('payment-amount');
+    const paymentPhoneSpan = document.getElementById('payment-phone');
+    const fieldMpesa = document.getElementById('field-mpesa');
+    const fieldPaymentNote = document.getElementById('field-payment-note');
+    const heroCapacity = document.getElementById('hero-capacity');
 
-    function applyRegistrationState(open) {
-      registrationOpen = open;
-      const formWrap = form.closest('.card');
-      const submitBtnEl = document.getElementById('submit-btn');
+    // Runtime state
+    const state = {
+      registrationOpen: true,
+      requirePaymentProof: false,
+      paymentAmount: 45,
+      paymentPhone: '0741742291',
+      maxGroupMembers: 10,
+    };
 
-      // Remove any previous closed notice
+    function applyConfig(cfg) {
+      if (!cfg || typeof cfg !== 'object') return;
+
+      if (typeof cfg.registrationOpen === 'boolean') state.registrationOpen = cfg.registrationOpen;
+      if (typeof cfg.requirePaymentProof === 'boolean') state.requirePaymentProof = cfg.requirePaymentProof;
+      if (cfg.paymentAmount != null) state.paymentAmount = Number(cfg.paymentAmount) || state.paymentAmount;
+      if (cfg.paymentPhone) state.paymentPhone = String(cfg.paymentPhone);
+      if (cfg.maxGroupMembers != null) state.maxGroupMembers = Number(cfg.maxGroupMembers) || state.maxGroupMembers;
+
+      // Capacity hint in hero
+      if (heroCapacity) heroCapacity.textContent = `${state.maxGroupMembers} members`;
+
+      // Payment card + fields
+      if (paymentCard) {
+        paymentCard.hidden = !state.requirePaymentProof;
+      }
+      if (fieldMpesa) {
+        fieldMpesa.hidden = !state.requirePaymentProof;
+      }
+      if (fieldPaymentNote) {
+        fieldPaymentNote.hidden = !state.requirePaymentProof;
+      }
+
+      // Displayed amount + phone
+      if (paymentAmountSpan) paymentAmountSpan.textContent = String(state.paymentAmount);
+      if (paymentPhoneSpan) paymentPhoneSpan.textContent = state.paymentPhone;
+
+      // Registration-open notice handling
       const existingNotice = document.getElementById('registration-closed-notice');
-      if (existingNotice) existingNotice.remove();
+      const formWrap = form.closest('.card');
 
-      if (open) {
-        form.hidden = false;
-        if (formWrap) formWrap.hidden = false;
-      } else {
-        // Insert a "closed" notice above the form and hide the form
-        if (formWrap && formWrap.parentNode) {
+      if (!state.registrationOpen) {
+        if (!existingNotice && formWrap && formWrap.parentNode) {
           const notice = el('div', { class: 'card card-info', id: 'registration-closed-notice' }, [
             el('div', { class: 'card-head' }, [
               el('h2', { text: 'Registration is currently closed' }),
@@ -513,21 +680,29 @@
           formWrap.parentNode.insertBefore(notice, formWrap);
         }
         form.hidden = true;
+        if (submitBtn) submitBtn.disabled = true;
+      } else {
+        if (existingNotice) existingNotice.remove();
+        form.hidden = false;
+        if (submitBtn) submitBtn.disabled = false;
       }
-
-      if (submitBtnEl) submitBtnEl.disabled = !open;
     }
 
-    // Fetch current status from the server.
+    // Fetch config on load
     (async () => {
       try {
-        const { ok, data } = await api('/api/registration-status');
-        if (ok && data && typeof data.open === 'boolean') {
-          applyRegistrationState(data.open);
+        const { ok, data } = await api('/api/payment-config');
+        if (ok && data && data.success) {
+          applyConfig(data);
+        } else {
+          // Fall back to status-only check
+          const statusRes = await api('/api/registration-status');
+          if (statusRes.ok && statusRes.data && typeof statusRes.data.open === 'boolean') {
+            applyConfig({ registrationOpen: statusRes.data.open });
+          }
         }
       } catch (_) {
-        // If the check fails, assume open so users can still try.
-        applyRegistrationState(true);
+        applyConfig({ registrationOpen: true });
       }
     })();
 
@@ -542,7 +717,7 @@
       clearFieldErrors(form);
       Alert.clear();
 
-      if (!registrationOpen) {
+      if (!state.registrationOpen) {
         Alert.warning(
           'Registration is currently closed. Please check back later.',
           { title: 'Registration closed' }
@@ -554,6 +729,8 @@
       const name = ($('#name') || {}).value || '';
       const phone = ($('#phone') || {}).value || '';
       const groupName = ($('#groupName') || {}).value || '';
+      const mpesaCode = state.requirePaymentProof ? (($('#mpesaCode') || {}).value || '') : '';
+      const paymentNote = state.requirePaymentProof ? (($('#paymentNote') || {}).value || '') : '';
 
       let hasError = false;
       if (!regNo.trim()) { setFieldError('regNo', 'Registration number is required.'); hasError = true; }
@@ -565,6 +742,21 @@
       if (!phone.trim()) { setFieldError('phone', 'Phone number is required.'); hasError = true; }
 
       if (!groupName.trim()) { setFieldError('groupName', 'Group name is required.'); hasError = true; }
+
+      if (state.requirePaymentProof) {
+        const code = mpesaCode.trim().toUpperCase();
+        if (!code) {
+          setFieldError('mpesaCode', 'M-Pesa confirmation code is required.');
+          hasError = true;
+        } else if (!/^[A-Z0-9]{10}$/.test(code)) {
+          setFieldError('mpesaCode', 'Enter the 10-character code from the M-Pesa SMS.');
+          hasError = true;
+        }
+        if (!paymentNote.trim()) {
+          setFieldError('paymentNote', 'Please note the time and day you paid.');
+          hasError = true;
+        }
+      }
 
       if (hasError) {
         Alert.warning('Please complete all required fields correctly.', { title: 'Check your input' });
@@ -579,6 +771,10 @@
         deviceId: Device.getId(),
         deviceMetadata: Device.getMetadata(),
       };
+      if (state.requirePaymentProof) {
+        payload.mpesaCode = mpesaCode.trim().toUpperCase();
+        payload.paymentNote = paymentNote.trim();
+      }
 
       const { ok, data } = await api('/api/register', {
         method: 'POST',
@@ -599,6 +795,8 @@
       else if (code === 'INVALID_PHONE') setFieldError('phone', message);
       else if (code === 'INVALID_GROUP') setFieldError('groupName', message);
       else if (code === 'DUPLICATE_REGNO') setFieldError('regNo', 'This registration number is already registered.');
+      else if (code === 'PAYMENT_REQUIRED') setFieldError('mpesaCode', message);
+      else if (code === 'PAYMENT_NOTE_REQUIRED') setFieldError('paymentNote', message);
 
       if (code === 'DUPLICATE_REGNO') {
         Alert.warning(message, { title: 'Duplicate registration' });
@@ -607,10 +805,17 @@
       } else if (code === 'DEVICE_USED') {
         Alert.warning(message, { title: 'Device already used' });
       } else if (code === 'REGISTRATION_CLOSED') {
-        // Server-side closed detection — sync UI
-        applyRegistrationState(false);
+        state.registrationOpen = false;
+        applyConfig({ registrationOpen: false });
         Alert.warning(message, { title: 'Registration closed' });
-      } else if (code === 'INVALID_REQNO' || code === 'INVALID_NAME' || code === 'INVALID_PHONE' || code === 'INVALID_GROUP') {
+      } else if (
+        code === 'INVALID_REQNO' ||
+        code === 'INVALID_NAME' ||
+        code === 'INVALID_PHONE' ||
+        code === 'INVALID_GROUP' ||
+        code === 'PAYMENT_REQUIRED' ||
+        code === 'PAYMENT_NOTE_REQUIRED'
+      ) {
         Alert.error(message, { title: 'Check your input' });
       } else if (!Alert.isShowing()) {
         Alert.error(message, { title: 'Registration failed' });
@@ -631,15 +836,23 @@
         details.innerHTML = '';
         const g = data.group || {};
         const m = data.member || {};
-        const kv = [
+        const rows = [
           ['Registration No', m.regNo || ''],
           ['Full Name', m.name || ''],
           ['Phone Number', m.phone || ''],
           ['Group', g.name || ''],
           ['Role', m.isLeader ? 'GROUP LEADER' : 'MEMBER'],
-          ['Members in Group', `${g.memberCount || 0} / ${g.capacity || 10}`],
+          ['Members in Group', `${g.memberCount || 0} / ${g.capacity || state.maxGroupMembers}`],
         ];
-        for (const [k, v] of kv) {
+
+        // Show payment info if it was captured
+        if (m.mpesaCode) {
+          rows.push(['M-Pesa Code', m.mpesaCode]);
+          if (m.paymentAmount != null) rows.push(['Amount Paid (KSH)', String(m.paymentAmount)]);
+          if (m.paymentNote) rows.push(['Time & Day Paid', m.paymentNote]);
+        }
+
+        for (const [k, v] of rows) {
           details.appendChild(el('dt', { text: k }));
           details.appendChild(el('dd', { text: String(v) }));
         }
@@ -662,7 +875,7 @@
   }
 
   /* ============================================================
-   * 10. MEMBER PAGE (member.html)
+   * 12. MEMBER PAGE (member.html)
    * ============================================================ */
   async function initMemberPage() {
     const loginView = document.getElementById('view-login');
@@ -687,7 +900,6 @@
       if (logoutBtn) logoutBtn.hidden = false;
     };
 
-    // Session check.
     const me = await api('/api/member/me');
     if (me.ok && me.data && me.data.success && me.data.member) {
       await loadMemberGroup();
@@ -828,7 +1040,7 @@
   }
 
   /* ============================================================
-   * 11. ADMIN PAGE (admin.html)
+   * 13. ADMIN PAGE (admin.html)
    * ============================================================ */
   async function initAdminPage() {
     const loginView = document.getElementById('view-login');
@@ -841,13 +1053,13 @@
     const logoutBtn = document.getElementById('admin-logout-btn');
     const liveIndicator = document.getElementById('live-indicator');
 
-    /* ---- STATE FIRST (prevents TDZ errors) ---- */
+    /* ---- STATE ---- */
     let sse = null;
     let sseReconnectDelay = 1000;
     let currentGroupId = null;
     let currentGroupData = null;
 
-    /* ---- Registration status UI ---- */
+    /* ---- Registration + payment status pills ---- */
     function renderRegistrationStatus(open) {
       const pill = document.getElementById('submissions-status-pill');
       const help = document.getElementById('submissions-status-help');
@@ -868,20 +1080,145 @@
         if (label) {
           label.textContent = open ? 'Close Submissions' : 'Open Submissions';
         }
-        // Swap visual style: danger when open (action = close), primary when closed (action = open)
         toggleBtn.classList.toggle('btn-danger-outline', open);
         toggleBtn.classList.toggle('btn-primary', !open);
       }
     }
 
-    async function loadRegistrationStatus() {
-      const { ok, data } = await api('/api/admin/registration-status');
-      if (ok && data && typeof data.open === 'boolean') {
-        renderRegistrationStatus(data.open);
+    function renderPaymentStatus(requirePaymentProof) {
+      const pill = document.getElementById('payment-status-pill');
+      const help = document.getElementById('payment-status-help');
+
+      if (pill) {
+        pill.textContent = requirePaymentProof ? 'ON' : 'OFF';
+        pill.classList.toggle('badge-full', requirePaymentProof);
+        pill.classList.toggle('badge-member', !requirePaymentProof);
+        pill.classList.toggle('badge-open', false);
+      }
+      if (help) {
+        help.textContent = requirePaymentProof
+          ? 'Students must submit an M-Pesa code (KSH 45 → Pochi).'
+          : 'M-Pesa code is not required on registration.';
       }
     }
 
-    /* ---- SSE functions ---- */
+    /* ---- Settings form ---- */
+    const settingsForm = document.getElementById('settings-form');
+    const settingsSaveBtn = document.getElementById('settings-save-btn');
+    const settingsResetBtn = document.getElementById('settings-reset-btn');
+    const settingsSavedAt = document.getElementById('settings-saved-at');
+
+    let currentSettings = null;
+
+    function fillSettingsForm(s) {
+      if (!s) return;
+      currentSettings = s;
+      const requireChk = document.getElementById('setting-require-payment');
+      const amountInp = document.getElementById('setting-payment-amount');
+      const phoneInp = document.getElementById('setting-payment-phone');
+      const maxInp = document.getElementById('setting-max-members');
+      const maxHelp = document.getElementById('setting-max-help');
+
+      if (requireChk) requireChk.checked = s.requirePaymentProof === true;
+      if (amountInp) amountInp.value = s.paymentAmount != null ? String(s.paymentAmount) : '45';
+      if (phoneInp) phoneInp.value = s.paymentPhone || '0741742291';
+      if (maxInp) {
+        maxInp.value = s.maxGroupMembers != null ? String(s.maxGroupMembers) : '10';
+        maxInp.max = String(s.maxGroupMembersHardLimit || 20);
+      }
+      if (maxHelp && s.maxGroupMembersHardLimit) {
+        maxHelp.textContent =
+          `Between 1 and ${s.maxGroupMembersHardLimit}. Applies to new registrations only — existing groups keep their members.`;
+      }
+
+      renderRegistrationStatus(s.registrationOpen !== false);
+      renderPaymentStatus(s.requirePaymentProof === true);
+
+      if (settingsSavedAt) {
+        settingsSavedAt.textContent = 'Loaded from server at ' + new Date().toLocaleTimeString();
+      }
+    }
+
+    async function loadSettings() {
+      const { ok, data } = await api('/api/admin/settings');
+      if (ok && data && data.success) {
+        fillSettingsForm(data);
+      }
+    }
+
+    if (settingsForm) {
+      settingsForm.addEventListener('submit', withLoading(settingsSaveBtn, async (e) => {
+        e.preventDefault();
+        clearFieldErrors(settingsForm);
+
+        const requireChk = document.getElementById('setting-require-payment');
+        const amountInp = document.getElementById('setting-payment-amount');
+        const phoneInp = document.getElementById('setting-payment-phone');
+        const maxInp = document.getElementById('setting-max-members');
+
+        const payload = {
+          requirePaymentProof: Boolean(requireChk && requireChk.checked),
+          paymentAmount: Number(amountInp ? amountInp.value : 45),
+          paymentPhone: phoneInp ? phoneInp.value.trim() : '',
+          maxGroupMembers: Number(maxInp ? maxInp.value : 10),
+        };
+
+        let hasError = false;
+        if (!Number.isFinite(payload.paymentAmount) || payload.paymentAmount < 0) {
+          setFieldError('setting-payment-amount', 'Enter a valid amount (≥ 0).');
+          hasError = true;
+        }
+        if (!payload.paymentPhone) {
+          setFieldError('setting-payment-phone', 'Payment phone is required.');
+          hasError = true;
+        }
+        if (!Number.isFinite(payload.maxGroupMembers) || payload.maxGroupMembers < 1 || payload.maxGroupMembers > 20) {
+          setFieldError('setting-max-members', 'Must be between 1 and 20.');
+          hasError = true;
+        }
+        if (hasError) {
+          Alert.error('Please fix the highlighted fields.', { title: 'Invalid settings' });
+          return;
+        }
+
+        const { ok, data } = await api('/api/admin/settings', {
+          method: 'POST',
+          body: payload,
+        });
+
+        if (ok && data && data.success) {
+          Alert.success(data.message || 'Settings saved.', { timeout: 2500 });
+          fillSettingsForm({
+            registrationOpen: data.registrationOpen,
+            requirePaymentProof: data.requirePaymentProof,
+            paymentAmount: data.paymentAmount,
+            paymentPhone: data.paymentPhone,
+            maxGroupMembers: data.maxGroupMembers,
+            maxGroupMembersHardLimit: data.maxGroupMembersHardLimit,
+          });
+          if (settingsSavedAt) {
+            settingsSavedAt.textContent = 'Last saved at ' + new Date().toLocaleTimeString();
+          }
+          // Refresh the dashboard so tiles reflect the new cap
+          loadDashboard();
+        } else {
+          Alert.error((data && data.message) || 'Could not save settings.');
+        }
+      }));
+    }
+
+    if (settingsResetBtn) {
+      settingsResetBtn.addEventListener('click', () => {
+        if (currentSettings) {
+          fillSettingsForm(currentSettings);
+          Alert.info('Form reset to the last saved values.', { timeout: 1800 });
+        } else {
+          loadSettings();
+        }
+      });
+    }
+
+    /* ---- SSE ---- */
     function startSse() {
       if (sse) return;
       try {
@@ -913,14 +1250,14 @@
             const g = payload.group || {};
             Alert.info(
               `${m.name || 'New member'} (${m.regNo || ''}) registered in "${g.name || ''}".` +
-                (payload.isLeader ? ' Assigned as Group Leader.' : ''),
+                (payload.isLeader ? ' Assigned as Group Leader.' : '') +
+                (m.mpesaCode ? ` Paid: ${m.mpesaCode}` : ''),
               { title: 'New registration', timeout: 6000 }
             );
           } catch (_) { /* ignore */ }
           refreshAll();
         });
 
-        // NEW: listen for registration status changes made by any admin tab.
         sse.addEventListener('registration-status', (ev) => {
           try {
             const payload = JSON.parse(ev.data);
@@ -928,6 +1265,10 @@
               renderRegistrationStatus(payload.open);
             }
           } catch (_) { /* ignore */ }
+        });
+
+        sse.addEventListener('settings-updated', () => {
+          loadSettings();
         });
 
         ['member-added', 'member-updated', 'member-deleted', 'group-created', 'group-updated', 'group-deleted']
@@ -974,7 +1315,7 @@
     /* ---- Session check ---- */
     const me = await api('/api/admin/me');
     if (me.ok && me.data && me.data.success) {
-      await Promise.all([loadDashboard(), loadRegistrationStatus()]);
+      await Promise.all([loadDashboard(), loadSettings()]);
       startSse();
       showDashboard();
     } else {
@@ -1004,7 +1345,7 @@
         if (ok && data && data.success) {
           Alert.success('Welcome, administrator.', { timeout: 2500 });
           loginForm.reset();
-          await Promise.all([loadDashboard(), loadRegistrationStatus()]);
+          await Promise.all([loadDashboard(), loadSettings()]);
           startSse();
           showDashboard();
         } else {
@@ -1084,6 +1425,7 @@
       const totals = data.totals || {};
       const groups = data.groups || [];
       const recent = data.recent || [];
+      const maxGroupMembers = data.maxGroupMembers || 10;
 
       window.__peg_lastGroups = groups;
 
@@ -1091,7 +1433,7 @@
       setText('stat-total-groups', totals.totalGroups != null ? totals.totalGroups : 0);
       setText('stat-total-leaders', totals.totalLeaders != null ? totals.totalLeaders : 0);
 
-      const totalSlots = groups.length * 10;
+      const totalSlots = groups.length * maxGroupMembers;
       const usedSlots = groups.reduce((acc, g) => acc + (g.memberCount || 0), 0);
       const pct = totalSlots > 0 ? Math.round((usedSlots / totalSlots) * 100) : 0;
       setText('stat-capacity-pct', pct + '%');
@@ -1102,7 +1444,7 @@
         recentBody.innerHTML = '';
         if (recent.length === 0) {
           recentBody.appendChild(el('tr', {}, [
-            el('td', { colspan: '6', class: 'table-empty', text: 'No registrations yet.' }),
+            el('td', { colspan: '7', class: 'table-empty', text: 'No registrations yet.' }),
           ]));
         } else {
           recent.forEach((m) => {
@@ -1118,6 +1460,7 @@
                 text: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
               }),
             ]));
+            tr.appendChild(buildPaymentCell(m));
             recentBody.appendChild(tr);
           });
         }
@@ -1129,13 +1472,14 @@
         if (groups.length === 0) {
           grid.appendChild(el('p', { class: 'muted', text: 'No groups yet. Click "+ New Group" to create one.' }));
         } else {
-          groups.forEach((g) => grid.appendChild(buildGroupCard(g)));
+          groups.forEach((g) => grid.appendChild(buildGroupCard(g, maxGroupMembers)));
         }
       }
     }
 
-    function buildGroupCard(g) {
-      const isFull = g.memberCount >= (g.capacity || 10);
+    function buildGroupCard(g, maxGroupMembers) {
+      const cap = g.capacity || maxGroupMembers || 10;
+      const isFull = g.memberCount >= cap;
       return el('button', {
         type: 'button',
         class: 'group-card',
@@ -1150,7 +1494,7 @@
           }),
         ]),
         el('div', { class: 'group-card-meta' }, [
-          el('span', { class: 'group-card-count', text: `${g.memberCount} / ${g.capacity || 10} members` }),
+          el('span', { class: 'group-card-count', text: `${g.memberCount} / ${cap} members` }),
         ]),
         el('div', { class: 'group-card-leader' }, [
           'Leader: ',
@@ -1170,7 +1514,7 @@
         .forEach((id) => setText(id, '0'));
       setText('stat-capacity-sub', '0 / 0 slots');
       const rb = document.getElementById('recent-table-body');
-      if (rb) rb.innerHTML = '<tr><td colspan="6" class="table-empty">Loading…</td></tr>';
+      if (rb) rb.innerHTML = '<tr><td colspan="7" class="table-empty">Loading…</td></tr>';
       const grid = document.getElementById('groups-list');
       if (grid) grid.innerHTML = '<p class="muted">Loading groups…</p>';
     }
@@ -1179,7 +1523,7 @@
     const refreshBtn = document.getElementById('btn-refresh-dashboard');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', withLoading(refreshBtn, async () => {
-        await Promise.all([loadDashboard(), loadRegistrationStatus()]);
+        await Promise.all([loadDashboard(), loadSettings()]);
         Alert.success('Refreshed.', { timeout: 1500 });
       }));
     }
@@ -1289,7 +1633,7 @@
 
       if (members.length === 0) {
         tbody.appendChild(el('tr', {}, [
-          el('td', { colspan: '6', class: 'table-empty', text: 'No members in this group yet.' }),
+          el('td', { colspan: '7', class: 'table-empty', text: 'No members in this group yet.' }),
         ]));
         return;
       }
@@ -1306,6 +1650,7 @@
             text: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
           }),
         ]));
+        tr.appendChild(buildPaymentCell(m));
         tr.appendChild(el('td', {}, [
           el('div', { class: 'row-actions' }, [
             el('button', {
@@ -1387,12 +1732,17 @@
       const nameInput = document.getElementById('member-name');
       const phoneInput = document.getElementById('member-phone');
       const groupSelect = document.getElementById('member-group');
+      const mpesaInput = document.getElementById('member-mpesa');
+      const noteInput = document.getElementById('member-payment-note');
 
       if (groupSelect) {
         groupSelect.innerHTML = '';
         const list = window.__peg_lastGroups || (currentGroupData && currentGroupData.group ? [currentGroupData.group] : []);
         for (const g of list) {
-          const opt = el('option', { value: g.id, text: `${g.name} (${g.memberCount}/${g.capacity || 10})` });
+          const opt = el('option', {
+            value: g.id,
+            text: `${g.name} (${g.memberCount}/${g.capacity || 10})`,
+          });
           if (g.id === presetGroupId) opt.selected = true;
           groupSelect.appendChild(opt);
         }
@@ -1405,6 +1755,8 @@
         if (nameInput) nameInput.value = member.name;
         if (phoneInput) phoneInput.value = member.phone;
         if (groupSelect) groupSelect.value = presetGroupId;
+        if (mpesaInput) mpesaInput.value = member.mpesaCode || '';
+        if (noteInput) noteInput.value = member.paymentNote || '';
       } else {
         if (title) title.textContent = 'Add Member';
         if (idInput) idInput.value = '';
@@ -1412,6 +1764,8 @@
         if (nameInput) nameInput.value = '';
         if (phoneInput) phoneInput.value = '';
         if (groupSelect) groupSelect.value = presetGroupId || '';
+        if (mpesaInput) mpesaInput.value = '';
+        if (noteInput) noteInput.value = '';
       }
       Modal.open('modal-member');
     }
@@ -1428,15 +1782,28 @@
         const name = ((document.getElementById('member-name') || {}).value || '').trim();
         const phone = ((document.getElementById('member-phone') || {}).value || '').trim();
         const groupId = ((document.getElementById('member-group') || {}).value || '').trim();
+        const mpesaCode = ((document.getElementById('member-mpesa') || {}).value || '').trim().toUpperCase();
+        const paymentNote = ((document.getElementById('member-payment-note') || {}).value || '').trim();
 
         let hasError = false;
         if (!regNo) { setFieldError('member-regNo', 'Registration number is required.'); hasError = true; }
         if (!name) { setFieldError('member-name', 'Full name is required.'); hasError = true; }
         if (!phone) { setFieldError('member-phone', 'Phone number is required.'); hasError = true; }
         if (!groupId) { setFieldError('member-group', 'Group is required.'); hasError = true; }
+        if (mpesaCode && !/^[A-Z0-9]{10}$/.test(mpesaCode)) {
+          setFieldError('member-mpesa', 'M-Pesa code must be 10 characters (A–Z, 0–9).');
+          hasError = true;
+        }
         if (hasError) return;
 
-        const payload = { regNo, name, phone, groupId };
+        const payload = {
+          regNo,
+          name,
+          phone,
+          groupId,
+          mpesaCode: mpesaCode || '',
+          paymentNote: paymentNote || '',
+        };
 
         const { ok, data } = id
           ? await api(`/api/admin/members/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload })
@@ -1477,8 +1844,8 @@
       }
     }
 
-    /* ---- Export links: blur on click so button doesn't stay focused ---- */
-    ['btn-export-csv', 'btn-export-pdf'].forEach((id) => {
+    /* ---- Export links: blur on click so the button doesn't stay focused ---- */
+    ['btn-export-csv', 'btn-export-pdf', 'btn-export-paid-pdf'].forEach((id) => {
       const link = document.getElementById(id);
       if (link) link.addEventListener('click', (e) => e.currentTarget.blur());
     });
@@ -1494,7 +1861,7 @@
   }
 
   /* ============================================================
-   * 12. Auto-bootstrap by page
+   * 14. Auto-bootstrap by page
    * ============================================================ */
   function bootstrap() {
     wireVisibilityToggles();
@@ -1528,7 +1895,7 @@
   }
 
   /* ============================================================
-   * 13. Public API
+   * 15. Public API
    * ============================================================ */
   window.PEG = window.PEG || {};
   window.PEG.initMemberPage = initMemberPage;
