@@ -4,17 +4,19 @@
  * ============================================================================
  * PHYSICS EDUCATION GROUPS — Complete Backend (server.js)
  * ============================================================================
- * Version: 1.2.0
+ * Version: 1.4.0
  *
- * Additions in this version:
- *   - Settings collection (single-doc key/value store)
+ * Highlights:
  *   - Registration open/close toggle
- *   - GET  /api/registration-status          (public)
- *   - POST /api/admin/registration-toggle    (admin)
- *   - /api/register guard when submissions are closed
- *   - PDF colors toned down (same layout, no heavy blue/red/green fills)
- *
- * Everything else unchanged from 1.1.1.
+ *   - Payment-proof mode (M-Pesa) — toggleable by admin
+ *   - Atomic group capacity enforcement (configurable cap 1–20)
+ *   - Normalized group matching (case + whitespace insensitive)
+ *   - Device lock + unique REG NO + leader reconciliation
+ *   - Professional PDF export:
+ *        /api/admin/export/pdf        → all groups + members (clean)
+ *        /api/admin/export/paid/pdf   → paid members only (with payment info)
+ *   - CSV export (clean columns)
+ *   - Server-Sent Events for live admin updates
  * ============================================================================
  */
 
@@ -118,7 +120,10 @@ const CONFIG = Object.freeze({
   CORS_ORIGIN,
   STORE_IP_HASH,
   ENFORCE_DEVICE_LOCK,
-  MAX_GROUP_MEMBERS: 10,
+
+  MAX_GROUP_MEMBERS_HARD_LIMIT: 20,
+  MAX_GROUP_MEMBERS_DEFAULT: 10,
+
   ADMIN_COOKIE: 'peg_admin_sid',
   MEMBER_COOKIE: 'peg_member_sid',
   CSRF_COOKIE: 'peg_csrf',
@@ -179,6 +184,10 @@ function normalizePhone(raw) {
   return null;
 }
 
+function normalizePochiPhone(raw) {
+  return normalizePhone(raw);
+}
+
 function isValidDeviceId(id) {
   if (!id || typeof id !== 'string') return false;
   const trimmed = id.trim();
@@ -203,6 +212,29 @@ function isValidName(raw) {
   const n = normalizeName(raw);
   if (n.length < 2 || n.length > 120) return false;
   return /^[\p{L}\p{M}0-9 .,'\-()]+$/u.test(n);
+}
+
+function normalizeMpesaCode(raw) {
+  if (raw === null || raw === undefined) return '';
+  return String(raw)
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
+}
+
+function isValidMpesaCode(raw) {
+  const s = normalizeMpesaCode(raw);
+  return /^[A-Z0-9]{10}$/.test(s);
+}
+
+function sanitizePaymentNote(raw) {
+  if (raw === null || raw === undefined) return '';
+  return String(raw)
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
 }
 
 function sanitizeDeviceMetadata(meta) {
@@ -403,17 +435,20 @@ const GroupSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
-      max: [CONFIG.MAX_GROUP_MEMBERS, `Group cannot exceed ${CONFIG.MAX_GROUP_MEMBERS} members.`],
+      max: [
+        CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT,
+        `Group cannot exceed ${CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT} members.`,
+      ],
     },
   },
   { timestamps: true, versionKey: false }
 );
 
 GroupSchema.virtual('isFull').get(function () {
-  return this.memberCount >= CONFIG.MAX_GROUP_MEMBERS;
+  return this.memberCount >= CONFIG.MAX_GROUP_MEMBERS_DEFAULT;
 });
 GroupSchema.virtual('availableSlots').get(function () {
-  return Math.max(0, CONFIG.MAX_GROUP_MEMBERS - this.memberCount);
+  return Math.max(0, CONFIG.MAX_GROUP_MEMBERS_DEFAULT - this.memberCount);
 });
 GroupSchema.set('toJSON', { virtuals: true });
 GroupSchema.set('toObject', { virtuals: true });
@@ -498,6 +533,30 @@ const MemberSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+
+    // ---------- Lab manual payment fields (all optional) ----------
+    mpesaCode: {
+      type: String,
+      default: null,
+      trim: true,
+      uppercase: true,
+      maxlength: 20,
+    },
+    paymentAmount: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
+    paymentNote: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 200,
+    },
+    paymentSubmittedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true, versionKey: false }
 );
@@ -514,6 +573,7 @@ MemberSchema.index(
 
 MemberSchema.index({ group: 1, createdAt: 1 });
 MemberSchema.index({ group: 1, isLeader: -1, createdAt: 1 });
+MemberSchema.index({ mpesaCode: 1 }, { sparse: true, name: 'mpesaCode_present' });
 
 const Member = mongoose.model('Member', MemberSchema);
 
@@ -569,7 +629,6 @@ const AdminSessionSchema = new mongoose.Schema(
 
 const AdminSession = mongoose.model('AdminSession', AdminSessionSchema);
 
-// ---------- Settings (key/value store) ----------
 const SettingsSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true, index: true, trim: true },
@@ -581,7 +640,7 @@ const SettingsSchema = new mongoose.Schema(
 const Settings = mongoose.model('Settings', SettingsSchema);
 
 // ============================================================================
-// SECTION 5 — BUSINESS HELPERS
+// SECTION 5 — SETTINGS + BUSINESS HELPERS
 // ============================================================================
 
 async function getSetting(key, defaultValue = null) {
@@ -602,13 +661,33 @@ async function setSetting(key, value) {
   return doc ? doc.value : value;
 }
 
-/**
- * Registration is considered OPEN by default. Only an explicit
- * `false` value disables it.
- */
 async function isRegistrationOpen() {
   const v = await getSetting('registration_open', true);
   return v !== false;
+}
+
+async function isPaymentProofRequired() {
+  const v = await getSetting('require_payment_proof', false);
+  return v === true;
+}
+
+async function getPaymentAmount() {
+  const v = await getSetting('payment_amount', 45);
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : 45;
+}
+
+async function getPaymentPhone() {
+  const v = await getSetting('payment_phone', '0741742291');
+  const s = String(v || '').trim();
+  return s || '0741742291';
+}
+
+async function getMaxGroupMembers() {
+  const v = await getSetting('max_group_members', CONFIG.MAX_GROUP_MEMBERS_DEFAULT);
+  const n = Number(v);
+  if (!Number.isFinite(n)) return CONFIG.MAX_GROUP_MEMBERS_DEFAULT;
+  return Math.max(1, Math.min(CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT, Math.floor(n)));
 }
 
 async function reconcileGroupLeader(groupId) {
@@ -658,8 +737,7 @@ function shapeGroup(group, extra = {}) {
     name: group.name,
     normalizedName: group.normalizedName,
     memberCount: group.memberCount,
-    capacity: CONFIG.MAX_GROUP_MEMBERS,
-    isFull: group.memberCount >= CONFIG.MAX_GROUP_MEMBERS,
+    capacity: extra.capacity != null ? extra.capacity : CONFIG.MAX_GROUP_MEMBERS_DEFAULT,
     leader: group.leader ? String(group.leader) : null,
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
@@ -667,8 +745,8 @@ function shapeGroup(group, extra = {}) {
   };
 }
 
-function shapeMember(member) {
-  return {
+function shapeMember(member, opts = {}) {
+  const base = {
     id: String(member._id),
     regNo: member.regNo,
     name: member.name,
@@ -679,6 +757,13 @@ function shapeMember(member) {
     createdAt: member.createdAt,
     updatedAt: member.updatedAt,
   };
+  if (opts.includePayment) {
+    base.mpesaCode = member.mpesaCode || null;
+    base.paymentAmount = member.paymentAmount != null ? member.paymentAmount : null;
+    base.paymentNote = member.paymentNote || null;
+    base.paymentSubmittedAt = member.paymentSubmittedAt || null;
+  }
+  return base;
 }
 
 // ============================================================================
@@ -847,7 +932,7 @@ app.get('/api/health', (req, res) => {
     uptime: Math.floor(process.uptime()),
     db: states[mongoose.connection.readyState] || 'unknown',
     transactions: supportsTransactions,
-    version: '1.2.0',
+    version: '1.4.0',
   });
 });
 
@@ -863,7 +948,6 @@ app.get('/api/csrf-token', (req, res) => {
   return ok(res, { token });
 });
 
-// Public: is registration open?
 app.get(
   '/api/registration-status',
   asyncHandler(async (req, res) => {
@@ -872,13 +956,62 @@ app.get(
   })
 );
 
+/**
+ * Public configuration needed by the register page.
+ * Returns:
+ *   - registrationOpen       : boolean
+ *   - requirePaymentProof    : boolean — if true, the register page
+ *                              must display the M-Pesa code field
+ *   - paymentAmount          : number (KSH)
+ *   - paymentPhone           : string (Pochi phone)
+ *   - maxGroupMembers        : number
+ */
+app.get(
+  '/api/payment-config',
+  asyncHandler(async (req, res) => {
+    const [
+      registrationOpen,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+      maxGroupMembers,
+    ] = await Promise.all([
+      isRegistrationOpen(),
+      isPaymentProofRequired(),
+      getPaymentAmount(),
+      getPaymentPhone(),
+      getMaxGroupMembers(),
+    ]);
+    return ok(res, {
+      registrationOpen,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+      maxGroupMembers,
+    });
+  })
+);
+
 app.post(
   '/api/register',
   registerLimiter,
   asyncHandler(async (req, res) => {
-    // NEW: reject when registration is closed
-    const open = await isRegistrationOpen();
-    if (!open) {
+    // ---- Read current settings ----
+    const [
+      registrationOpen,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+      maxGroupMembers,
+    ] = await Promise.all([
+      isRegistrationOpen(),
+      isPaymentProofRequired(),
+      getPaymentAmount(),
+      getPaymentPhone(),
+      getMaxGroupMembers(),
+    ]);
+
+    if (!registrationOpen) {
       return fail(
         res,
         'Registration is currently closed. Please check back later or contact the Administrator.',
@@ -887,6 +1020,7 @@ app.post(
       );
     }
 
+    // ---- Parse + normalize input ----
     const body = req.body || {};
     const regNo = normalizeRegNo(body.regNo);
     const name = normalizeName(body.name);
@@ -895,7 +1029,10 @@ app.post(
     const groupNorm = normalizeGroupName(body.groupName);
     const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
     const deviceMetadata = sanitizeDeviceMetadata(body.deviceMetadata);
+    const mpesaCode = normalizeMpesaCode(body.mpesaCode);
+    const paymentNote = sanitizePaymentNote(body.paymentNote);
 
+    // ---- Field validation ----
     if (!isValidRegNo(regNo)) {
       return fail(res, 'Please provide a valid registration number.', 'INVALID_REQNO', 400);
     }
@@ -913,6 +1050,31 @@ app.post(
       return fail(res, 'Unable to identify this device. Please refresh and try again.', 'INVALID_DEVICE', 400);
     }
 
+    // ---- Payment proof validation — only when the admin has switched it ON ----
+    if (requirePaymentProof) {
+      if (!isValidMpesaCode(mpesaCode)) {
+        return fail(
+          res,
+          'Payment proof is required. Please send KSH ' +
+            paymentAmount +
+            ' to ' +
+            paymentPhone +
+            ' and paste the 10-character M-Pesa confirmation code.',
+          'PAYMENT_REQUIRED',
+          400
+        );
+      }
+      if (!paymentNote) {
+        return fail(
+          res,
+          'Please note down the time and day you paid in the payment note field.',
+          'PAYMENT_NOTE_REQUIRED',
+          400
+        );
+      }
+    }
+
+    // ---- Duplicate REG NO ----
     const existingReg = await Member.findOne({ regNo }).lean();
     if (existingReg) {
       console.log(`[register] rejected duplicate regNo=${regNo}`);
@@ -924,6 +1086,7 @@ app.post(
       );
     }
 
+    // ---- Device lock ----
     if (ENFORCE_DEVICE_LOCK) {
       const existingDevice = await Member.findOne({ deviceId }).lean();
       if (existingDevice) {
@@ -937,6 +1100,7 @@ app.post(
       }
     }
 
+    // ---- Find or create group (proper normalized matching) ----
     let group = await Group.findOne({ normalizedName: groupNorm });
     let isNewGroup = false;
 
@@ -962,17 +1126,18 @@ app.post(
       return fail(res, 'We could not complete your registration. Please contact the Administrator.', 'GROUP_CREATE_FAILED', 500);
     }
 
+    // ---- ATOMIC capacity increment (final authority) ----
     const incremented = await Group.findOneAndUpdate(
-      { _id: group._id, memberCount: { $lt: CONFIG.MAX_GROUP_MEMBERS } },
+      { _id: group._id, memberCount: { $lt: maxGroupMembers } },
       { $inc: { memberCount: 1 } },
       { new: true }
     );
 
     if (!incremented) {
-      console.log(`[register] group full: ${group.normalizedName}`);
+      console.log(`[register] group full: ${group.normalizedName} (cap=${maxGroupMembers})`);
       return fail(
         res,
-        'This group is already full. A group can have a maximum of 10 members. Please contact the Administrator or choose another group.',
+        `This group is already full. A group can have a maximum of ${maxGroupMembers} members. Please contact the Administrator or choose another group.`,
         'GROUP_FULL',
         409
       );
@@ -980,6 +1145,7 @@ app.post(
 
     const isLeader = incremented.memberCount === 1;
 
+    // ---- Create member with rollback on failure ----
     let member;
     try {
       member = await Member.create({
@@ -991,6 +1157,10 @@ app.post(
         deviceId: deviceId || null,
         deviceMetadata,
         ipHash: STORE_IP_HASH ? hashIp(req.ip) : null,
+        mpesaCode: mpesaCode || null,
+        paymentAmount: mpesaCode ? paymentAmount : null,
+        paymentNote: paymentNote || null,
+        paymentSubmittedAt: mpesaCode ? new Date() : null,
       });
     } catch (err) {
       await Group.updateOne({ _id: group._id }, { $inc: { memberCount: -1 } });
@@ -1027,13 +1197,15 @@ app.post(
 
     const finalGroup = await Group.findById(group._id);
     sseBroadcast('registration', {
-      member: shapeMember(member),
-      group: shapeGroup(finalGroup),
+      member: shapeMember(member, { includePayment: true }),
+      group: shapeGroup(finalGroup, { capacity: maxGroupMembers }),
       isNewGroup,
       isLeader,
     });
 
-    console.log(`[register] success regNo=${regNo} group=${group.normalizedName} leader=${isLeader}`);
+    console.log(
+      `[register] success regNo=${regNo} group=${group.normalizedName} leader=${isLeader} paid=${Boolean(mpesaCode)}`
+    );
 
     const message = isLeader
       ? 'You are the first member to register for this group. You have been assigned as the Group Leader.'
@@ -1045,8 +1217,19 @@ app.post(
         message,
         isLeader,
         isNewGroup,
-        member: shapeMember(member),
-        group: shapeGroup(finalGroup, { memberCount: freshCount }),
+        member: shapeMember(member, { includePayment: true }),
+        group: shapeGroup(finalGroup, {
+          capacity: maxGroupMembers,
+          memberCount: freshCount,
+        }),
+        payment: {
+          requirePaymentProof,
+          paymentAmount,
+          paymentPhone,
+          mpesaCode: member.mpesaCode || null,
+          paymentNote: member.paymentNote || null,
+          paymentSubmittedAt: member.paymentSubmittedAt || null,
+        },
       },
       201
     );
@@ -1092,10 +1275,12 @@ app.post(
 
     console.log(`[member-login] ${regNo} → ${group.normalizedName}`);
 
+    const maxGroupMembers = await getMaxGroupMembers();
+
     return ok(res, {
       message: 'Login successful.',
-      member: shapeMember(member),
-      group: shapeGroup(group),
+      member: shapeMember(member, { includePayment: true }),
+      group: shapeGroup(group, { capacity: maxGroupMembers }),
     });
   })
 );
@@ -1121,9 +1306,10 @@ app.get(
       return fail(res, 'Session invalid.', 'SESSION_INVALID', 401);
     }
     const group = await Group.findById(member.group);
+    const maxGroupMembers = await getMaxGroupMembers();
     return ok(res, {
-      member: shapeMember(member),
-      group: group ? shapeGroup(group) : null,
+      member: shapeMember(member, { includePayment: true }),
+      group: group ? shapeGroup(group, { capacity: maxGroupMembers }) : null,
     });
   })
 );
@@ -1141,16 +1327,28 @@ app.get(
       return fail(res, 'Group not found.', 'NOT_FOUND', 404);
     }
 
-    const members = await Member.find({ group: group._id })
-      .sort({ isLeader: -1, createdAt: 1 })
-      .select('regNo name phone isLeader group createdAt')
-      .lean();
+    const [
+      members,
+      maxGroupMembers,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+    ] = await Promise.all([
+      Member.find({ group: group._id })
+        .sort({ isLeader: -1, createdAt: 1 })
+        .select('regNo name phone isLeader group createdAt')
+        .lean(),
+      getMaxGroupMembers(),
+      isPaymentProofRequired(),
+      getPaymentAmount(),
+      getPaymentPhone(),
+    ]);
 
     const leader = members.find((m) => m.isLeader) || null;
 
     return ok(res, {
       group: {
-        ...shapeGroup(group),
+        ...shapeGroup(group, { capacity: maxGroupMembers }),
         leaderName: leader ? leader.name : null,
         leaderRegNo: leader ? leader.regNo : null,
       },
@@ -1163,7 +1361,20 @@ app.get(
         role: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
         createdAt: m.createdAt,
       })),
-      viewer: { regNo: member.regNo, name: member.name, isLeader: member.isLeader },
+      viewer: {
+        regNo: member.regNo,
+        name: member.name,
+        isLeader: member.isLeader,
+        mpesaCode: member.mpesaCode || null,
+        paymentNote: member.paymentNote || null,
+        paymentAmount: member.paymentAmount != null ? member.paymentAmount : null,
+        paymentSubmittedAt: member.paymentSubmittedAt || null,
+      },
+      paymentConfig: {
+        requirePaymentProof,
+        paymentAmount,
+        paymentPhone,
+      },
     });
   })
 );
@@ -1251,7 +1462,6 @@ app.get(
   })
 );
 
-// Admin: current registration status
 app.get(
   '/api/admin/registration-status',
   requireAdmin,
@@ -1261,7 +1471,6 @@ app.get(
   })
 );
 
-// Admin: toggle registration open/closed
 app.post(
   '/api/admin/registration-toggle',
   requireAdmin,
@@ -1283,13 +1492,154 @@ app.post(
 );
 
 app.get(
+  '/api/admin/settings',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const [
+      registrationOpen,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+      maxGroupMembers,
+    ] = await Promise.all([
+      isRegistrationOpen(),
+      isPaymentProofRequired(),
+      getPaymentAmount(),
+      getPaymentPhone(),
+      getMaxGroupMembers(),
+    ]);
+
+    return ok(res, {
+      registrationOpen,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+      maxGroupMembers,
+      maxGroupMembersHardLimit: CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT,
+    });
+  })
+);
+
+app.post(
+  '/api/admin/settings',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const body = req.body || {};
+    const updates = {};
+    const errors = [];
+
+    if (body.registrationOpen !== undefined) {
+      updates.registration_open = body.registrationOpen === true;
+    }
+
+    if (body.requirePaymentProof !== undefined) {
+      updates.require_payment_proof = body.requirePaymentProof === true;
+    }
+
+    if (body.paymentAmount !== undefined) {
+      const n = Number(body.paymentAmount);
+      if (!Number.isFinite(n) || n < 0 || n > 100000) {
+        errors.push('Payment amount must be a number between 0 and 100000.');
+      } else {
+        updates.payment_amount = Math.round(n);
+      }
+    }
+
+    if (body.paymentPhone !== undefined) {
+      const p = normalizePochiPhone(body.paymentPhone);
+      if (!p) {
+        errors.push('Payment phone must be a valid Kenyan number (e.g. 0741742291).');
+      } else {
+        updates.payment_phone = p.startsWith('+254') ? '0' + p.slice(4) : p;
+      }
+    }
+
+    if (body.maxGroupMembers !== undefined) {
+      const n = Number(body.maxGroupMembers);
+      if (!Number.isFinite(n) || n < 1 || n > CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT) {
+        errors.push(
+          `Max group members must be between 1 and ${CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT}.`
+        );
+      } else {
+        updates.max_group_members = Math.floor(n);
+      }
+    }
+
+    if (errors.length) {
+      return fail(res, errors.join(' '), 'VALIDATION', 400);
+    }
+
+    const entries = Object.entries(updates);
+    for (const [key, value] of entries) {
+      await setSetting(key, value);
+    }
+
+    console.log(
+      `[admin] settings updated: ${entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')}`
+    );
+
+    if (updates.registration_open !== undefined) {
+      sseBroadcast('registration-status', { open: updates.registration_open });
+    }
+    sseBroadcast('settings-updated', { keys: entries.map(([k]) => k) });
+
+    const [
+      registrationOpen,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+      maxGroupMembers,
+    ] = await Promise.all([
+      isRegistrationOpen(),
+      isPaymentProofRequired(),
+      getPaymentAmount(),
+      getPaymentPhone(),
+      getMaxGroupMembers(),
+    ]);
+
+    return ok(res, {
+      message: 'Settings saved.',
+      registrationOpen,
+      requirePaymentProof,
+      paymentAmount,
+      paymentPhone,
+      maxGroupMembers,
+      maxGroupMembersHardLimit: CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT,
+    });
+  })
+);
+
+/**
+ * Paid/unpaid summary counts — used by an optional dashboard pill.
+ */
+app.get(
+  '/api/admin/paid-summary',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const [total, paid] = await Promise.all([
+      Member.countDocuments(),
+      Member.countDocuments({ mpesaCode: { $type: 'string', $ne: '' } }),
+    ]);
+    return ok(res, { total, paid, unpaid: total - paid });
+  })
+);
+
+app.get(
   '/api/admin/dashboard',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const [totalMembers, totalGroups, totalLeaders] = await Promise.all([
+    const [
+      totalMembers,
+      totalGroups,
+      totalLeaders,
+      maxGroupMembers,
+      paidCount,
+    ] = await Promise.all([
       Member.countDocuments(),
       Group.countDocuments(),
       Member.countDocuments({ isLeader: true }),
+      getMaxGroupMembers(),
+      Member.countDocuments({ mpesaCode: { $type: 'string', $ne: '' } }),
     ]);
 
     const groups = await Group.find().sort({ createdAt: 1 }).lean();
@@ -1308,9 +1658,17 @@ app.get(
       .lean();
 
     return ok(res, {
-      totals: { totalMembers, totalGroups, totalLeaders },
+      totals: {
+        totalMembers,
+        totalGroups,
+        totalLeaders,
+        paid: paidCount,
+        unpaid: totalMembers - paidCount,
+      },
+      maxGroupMembers,
       groups: groups.map((g) =>
         shapeGroup(g, {
+          capacity: maxGroupMembers,
           leaderName: leaderByGroup[String(g._id)]?.name || null,
           leaderRegNo: leaderByGroup[String(g._id)]?.regNo || null,
         })
@@ -1324,6 +1682,10 @@ app.get(
         role: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
         groupName: m.group ? m.group.name : null,
         createdAt: m.createdAt,
+        mpesaCode: m.mpesaCode || null,
+        paymentAmount: m.paymentAmount != null ? m.paymentAmount : null,
+        paymentNote: m.paymentNote || null,
+        paymentSubmittedAt: m.paymentSubmittedAt || null,
       })),
     });
   })
@@ -1333,13 +1695,17 @@ app.get(
   '/api/admin/groups',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const groups = await Group.find().sort({ createdAt: 1 }).lean();
-    const leaders = await Member.find({ isLeader: true }).select('regNo name group').lean();
+    const [groups, leaders, maxGroupMembers] = await Promise.all([
+      Group.find().sort({ createdAt: 1 }).lean(),
+      Member.find({ isLeader: true }).select('regNo name group').lean(),
+      getMaxGroupMembers(),
+    ]);
     const leaderByGroup = {};
     for (const l of leaders) leaderByGroup[String(l.group)] = { regNo: l.regNo, name: l.name };
     return ok(res, {
       groups: groups.map((g) =>
         shapeGroup(g, {
+          capacity: maxGroupMembers,
           leaderName: leaderByGroup[String(g._id)]?.name || null,
           leaderRegNo: leaderByGroup[String(g._id)]?.regNo || null,
         })
@@ -1358,14 +1724,17 @@ app.get(
     const group = await Group.findById(req.params.id);
     if (!group) return fail(res, 'Group not found.', 'NOT_FOUND', 404);
 
-    const members = await Member.find({ group: group._id })
-      .sort({ isLeader: -1, createdAt: 1 })
-      .lean();
+    const [members, maxGroupMembers] = await Promise.all([
+      Member.find({ group: group._id })
+        .sort({ isLeader: -1, createdAt: 1 })
+        .lean(),
+      getMaxGroupMembers(),
+    ]);
     const leader = members.find((m) => m.isLeader) || null;
 
     return ok(res, {
       group: {
-        ...shapeGroup(group),
+        ...shapeGroup(group, { capacity: maxGroupMembers }),
         leaderName: leader ? leader.name : null,
         leaderRegNo: leader ? leader.regNo : null,
       },
@@ -1377,6 +1746,10 @@ app.get(
         isLeader: Boolean(m.isLeader),
         role: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
         createdAt: m.createdAt,
+        mpesaCode: m.mpesaCode || null,
+        paymentAmount: m.paymentAmount != null ? m.paymentAmount : null,
+        paymentNote: m.paymentNote || null,
+        paymentSubmittedAt: m.paymentSubmittedAt || null,
       })),
     });
   })
@@ -1400,9 +1773,19 @@ app.post(
       normalizedName: norm,
       memberCount: 0,
     });
+    const maxGroupMembers = await getMaxGroupMembers();
     console.log(`[admin] created group "${group.name}"`);
-    sseBroadcast('group-created', { group: shapeGroup(group) });
-    return ok(res, { message: 'Group created.', group: shapeGroup(group) }, 201);
+    sseBroadcast('group-created', {
+      group: shapeGroup(group, { capacity: maxGroupMembers }),
+    });
+    return ok(
+      res,
+      {
+        message: 'Group created.',
+        group: shapeGroup(group, { capacity: maxGroupMembers }),
+      },
+      201
+    );
   })
 );
 
@@ -1432,10 +1815,16 @@ app.patch(
     group.normalizedName = norm;
     await group.save();
 
+    const maxGroupMembers = await getMaxGroupMembers();
     console.log(`[admin] renamed group "${oldName}" → "${display}"`);
-    sseBroadcast('group-updated', { group: shapeGroup(group) });
+    sseBroadcast('group-updated', {
+      group: shapeGroup(group, { capacity: maxGroupMembers }),
+    });
 
-    return ok(res, { message: 'Group renamed.', group: shapeGroup(group) });
+    return ok(res, {
+      message: 'Group renamed.',
+      group: shapeGroup(group, { capacity: maxGroupMembers }),
+    });
   })
 );
 
@@ -1482,6 +1871,8 @@ app.post(
     const name = normalizeName(req.body.name);
     const phone = normalizePhone(req.body.phone);
     const groupId = req.body.groupId;
+    const mpesaCode = normalizeMpesaCode(req.body.mpesaCode);
+    const paymentNote = sanitizePaymentNote(req.body.paymentNote);
 
     if (!isValidRegNo(regNo)) return fail(res, 'Invalid registration number.', 'INVALID_REQNO', 400);
     if (!isValidName(name)) return fail(res, 'Invalid full name.', 'INVALID_NAME', 400);
@@ -1501,15 +1892,18 @@ app.post(
       );
     }
 
+    const maxGroupMembers = await getMaxGroupMembers();
+    const paymentAmount = await getPaymentAmount();
+
     const incremented = await Group.findOneAndUpdate(
-      { _id: group._id, memberCount: { $lt: CONFIG.MAX_GROUP_MEMBERS } },
+      { _id: group._id, memberCount: { $lt: maxGroupMembers } },
       { $inc: { memberCount: 1 } },
       { new: true }
     );
     if (!incremented) {
       return fail(
         res,
-        'This group is already full. Maximum is 10 members.',
+        `This group is already full. Maximum is ${maxGroupMembers} members.`,
         'GROUP_FULL',
         409
       );
@@ -1524,6 +1918,10 @@ app.post(
         phone,
         group: group._id,
         isLeader,
+        mpesaCode: mpesaCode || null,
+        paymentAmount: mpesaCode ? paymentAmount : null,
+        paymentNote: paymentNote || null,
+        paymentSubmittedAt: mpesaCode ? new Date() : null,
       });
     } catch (err) {
       await Group.updateOne({ _id: group._id }, { $inc: { memberCount: -1 } });
@@ -1540,11 +1938,15 @@ app.post(
 
     const freshGroup = await Group.findById(group._id);
     sseBroadcast('member-added', {
-      member: shapeMember(member),
-      group: shapeGroup(freshGroup),
+      member: shapeMember(member, { includePayment: true }),
+      group: shapeGroup(freshGroup, { capacity: maxGroupMembers }),
     });
 
-    return ok(res, { message: 'Member added.', member: shapeMember(member) }, 201);
+    return ok(
+      res,
+      { message: 'Member added.', member: shapeMember(member, { includePayment: true }) },
+      201
+    );
   })
 );
 
@@ -1576,13 +1978,14 @@ app.patch(
     }
 
     const movingGroup = String(newGroupId) !== String(oldGroupId);
+    const maxGroupMembers = await getMaxGroupMembers();
 
     if (movingGroup) {
       const target = await Group.findById(newGroupId);
       if (!target) return fail(res, 'Target group not found.', 'NOT_FOUND', 404);
 
       const incremented = await Group.findOneAndUpdate(
-        { _id: target._id, memberCount: { $lt: CONFIG.MAX_GROUP_MEMBERS } },
+        { _id: target._id, memberCount: { $lt: maxGroupMembers } },
         { $inc: { memberCount: 1 } },
         { new: true }
       );
@@ -1609,15 +2012,31 @@ app.patch(
       await reconcileGroupLeader(member.group);
     }
 
+    if (req.body.mpesaCode !== undefined) {
+      const code = normalizeMpesaCode(req.body.mpesaCode);
+      member.mpesaCode = code || null;
+      member.paymentSubmittedAt = code ? new Date() : null;
+      if (code && member.paymentAmount == null) {
+        member.paymentAmount = await getPaymentAmount();
+      }
+    }
+    if (req.body.paymentNote !== undefined) {
+      member.paymentNote = sanitizePaymentNote(req.body.paymentNote) || null;
+    }
+    await member.save();
+
     const freshGroup = await Group.findById(member.group);
     const freshMember = await Member.findById(member._id);
 
     sseBroadcast('member-updated', {
-      member: shapeMember(freshMember),
-      group: shapeGroup(freshGroup),
+      member: shapeMember(freshMember, { includePayment: true }),
+      group: shapeGroup(freshGroup, { capacity: maxGroupMembers }),
     });
 
-    return ok(res, { message: 'Member updated.', member: shapeMember(freshMember) });
+    return ok(res, {
+      message: 'Member updated.',
+      member: shapeMember(freshMember, { includePayment: true }),
+    });
   })
 );
 
@@ -1638,9 +2057,10 @@ app.delete(
     await reconcileGroupLeader(groupId);
 
     const freshGroup = await Group.findById(groupId);
+    const maxGroupMembers = await getMaxGroupMembers();
     sseBroadcast('member-deleted', {
       memberId: String(member._id),
-      group: freshGroup ? shapeGroup(freshGroup) : null,
+      group: freshGroup ? shapeGroup(freshGroup, { capacity: maxGroupMembers }) : null,
     });
 
     console.log(`[admin] deleted member ${member.regNo} from group ${groupId}`);
@@ -1650,7 +2070,7 @@ app.delete(
 );
 
 // ============================================================================
-// SECTION 11 — CSV EXPORT
+// SECTION 11 — CSV EXPORT (clean columns, no payment info)
 // ============================================================================
 
 function csvEscape(value) {
@@ -1705,7 +2125,7 @@ app.get(
 );
 
 // ============================================================================
-// SECTION 11B — PDF EXPORT (muted, professional, same layout)
+// SECTION 11B — PDF EXPORT
 // ============================================================================
 
 const PDF_COLORS = {
@@ -1740,7 +2160,94 @@ function pdfFmtLong(d) {
   } catch (_) { return ''; }
 }
 
-function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
+function pdfFmtShort(d) {
+  try {
+    return new Date(d).toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch (_) { return ''; }
+}
+
+/* ----------------------------------------------------------------
+ * Shared header used by every PDF (banner + title + timestamp)
+ * ---------------------------------------------------------------- */
+function pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle }) {
+  doc.save();
+  doc.rect(0, 0, pageWidth, 3).fill(PDF_COLORS.textDark);
+  doc.restore();
+
+  doc.fillColor(PDF_COLORS.textDark).fontSize(18).font('Helvetica-Bold');
+  doc.text('PHYSICS EDUCATION GROUPS', PDF_LAYOUT.margin, 26, {
+    width: contentWidth,
+    align: 'left',
+    lineBreak: false,
+  });
+
+  doc.fontSize(9).font('Helvetica').fillColor(PDF_COLORS.textMuted);
+  doc.text(String(reportTitle || '').toUpperCase(), PDF_LAYOUT.margin, 52, {
+    width: contentWidth * 0.6,
+    align: 'left',
+    lineBreak: false,
+  });
+
+  doc.fontSize(8).font('Helvetica').fillColor(PDF_COLORS.textMuted);
+  doc.text(
+    'Generated: ' + pdfFmtLong(new Date()),
+    PDF_LAYOUT.margin + contentWidth * 0.6,
+    53,
+    { width: contentWidth * 0.4, align: 'right', lineBreak: false }
+  );
+
+  doc.save();
+  doc
+    .moveTo(PDF_LAYOUT.margin, 74)
+    .lineTo(pageWidth - PDF_LAYOUT.margin, 74)
+    .strokeColor(PDF_COLORS.border)
+    .lineWidth(0.5)
+    .stroke();
+  doc.restore();
+}
+
+function pdfDrawFooter(doc, { pageWidth, pageHeight, contentWidth }) {
+  const range = doc.bufferedPageRange();
+  const totalPages = range.count;
+  const contentLeft = PDF_LAYOUT.margin;
+  const contentRight = pageWidth - PDF_LAYOUT.margin;
+
+  for (let i = 0; i < totalPages; i++) {
+    doc.switchToPage(range.start + i);
+    const footerY = pageHeight - 40;
+
+    doc.save();
+    doc
+      .moveTo(contentLeft, footerY - 8)
+      .lineTo(contentRight, footerY - 8)
+      .strokeColor(PDF_COLORS.borderLight)
+      .lineWidth(0.5)
+      .stroke();
+    doc.restore();
+
+    doc.fontSize(7.5).font('Helvetica').fillColor(PDF_COLORS.textMuted);
+    doc.text(
+      'Physics Education Groups  •  Confidential administrative document',
+      contentLeft,
+      footerY,
+      { width: contentWidth * 0.7, align: 'left', lineBreak: false }
+    );
+    doc.text(
+      `Page ${i + 1} of ${totalPages}`,
+      contentLeft + contentWidth * 0.7,
+      footerY,
+      { width: contentWidth * 0.3, align: 'right', lineBreak: false }
+    );
+  }
+}
+
+/* ----------------------------------------------------------------
+ * PDF #1 — Full group registry (clean, no payment info)
+ * ---------------------------------------------------------------- */
+function buildGroupsPdf({ groups, reportTitle, reportSubtitle, maxGroupMembers }) {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({
@@ -1766,7 +2273,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', (err) => reject(err));
 
-      // Add first page BEFORE reading dimensions.
       doc.addPage();
 
       const pageWidth = (doc.page && doc.page.width) || A4_WIDTH;
@@ -1774,6 +2280,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       const contentWidth = pageWidth - PDF_LAYOUT.margin * 2;
       const contentLeft = PDF_LAYOUT.margin;
       const contentRight = pageWidth - PDF_LAYOUT.margin;
+      const capacity = maxGroupMembers || CONFIG.MAX_GROUP_MEMBERS_DEFAULT;
 
       const totals = groups.reduce(
         (acc, g) => {
@@ -1808,49 +2315,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           colWidths.phone,
       };
 
-      function drawPageHeader() {
-        // Thin dark top bar
-        doc.save();
-        doc.rect(0, 0, pageWidth, 3).fill(PDF_COLORS.textDark);
-        doc.restore();
-
-        // Title
-        doc.fillColor(PDF_COLORS.textDark).fontSize(18).font('Helvetica-Bold');
-        doc.text('PHYSICS EDUCATION GROUPS', PDF_LAYOUT.margin, 26, {
-          width: contentWidth,
-          align: 'left',
-          lineBreak: false,
-        });
-
-        // Subtitle
-        doc.fontSize(9).font('Helvetica').fillColor(PDF_COLORS.textMuted);
-        doc.text(String(reportTitle || '').toUpperCase(), PDF_LAYOUT.margin, 52, {
-          width: contentWidth * 0.6,
-          align: 'left',
-          lineBreak: false,
-        });
-
-        // Timestamp (right)
-        doc.fontSize(8).font('Helvetica').fillColor(PDF_COLORS.textMuted);
-        doc.text(
-          'Generated: ' + pdfFmtLong(new Date()),
-          PDF_LAYOUT.margin + contentWidth * 0.6,
-          53,
-          { width: contentWidth * 0.4, align: 'right', lineBreak: false }
-        );
-
-        // Thin rule
-        doc.save();
-        doc
-          .moveTo(PDF_LAYOUT.margin, 74)
-          .lineTo(pageWidth - PDF_LAYOUT.margin, 74)
-          .strokeColor(PDF_COLORS.border)
-          .lineWidth(0.5)
-          .stroke();
-        doc.restore();
-      }
-
-      drawPageHeader();
+      pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle });
 
       let y = 92;
 
@@ -1860,7 +2325,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         y += 16;
       }
 
-      // Summary box — subtle gray, values in black
       const summaryBoxHeight = 62;
       doc.save();
       doc
@@ -1872,7 +2336,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         { label: 'TOTAL GROUPS', value: String(totals.groups) },
         { label: 'TOTAL MEMBERS', value: String(totals.members) },
         { label: 'GROUP LEADERS', value: String(totals.leaders) },
-        { label: 'CAPACITY PER GROUP', value: String(CONFIG.MAX_GROUP_MEMBERS) },
+        { label: 'CAPACITY PER GROUP', value: String(capacity) },
       ];
       const itemWidth = contentWidth / summaryItems.length;
       summaryItems.forEach((item, i) => {
@@ -1888,7 +2352,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
       function ensureSpace(needed) {
         if (y + needed > pageHeight - PDF_LAYOUT.margin - PDF_LAYOUT.footerHeight + 10) {
           doc.addPage();
-          drawPageHeader();
+          pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle });
           y = 92;
         }
       }
@@ -1897,15 +2361,12 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         ensureSpace(80);
 
         const headerHeight = 44;
-
-        // Group header box — light gray
         doc.save();
         doc
           .roundedRect(contentLeft, y, contentWidth, headerHeight, 4)
           .fillAndStroke(PDF_COLORS.bgLight, PDF_COLORS.border);
         doc.restore();
 
-        // Number circle — white with dark outline
         doc.save();
         doc
           .circle(contentLeft + 24, y + headerHeight / 2, 13)
@@ -1917,7 +2378,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           align: 'center',
         });
 
-        // Group name — black
         doc.fontSize(13).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
         doc.text(group.name, contentLeft + 48, y + 8, {
           width: contentWidth - 200,
@@ -1926,10 +2386,9 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        // Meta — gray
         doc.fontSize(8.5).font('Helvetica').fillColor(PDF_COLORS.textMuted);
         const metaParts = [];
-        metaParts.push(`${(group.members || []).length} / ${group.capacity || 10} members`);
+        metaParts.push(`${(group.members || []).length} / ${capacity} members`);
         if (group.leaderName) {
           metaParts.push(
             `Leader: ${group.leaderName}${group.leaderRegNo ? ' (' + group.leaderRegNo + ')' : ''}`
@@ -1942,8 +2401,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        // Status badge — outlined, colored text only
-        const isFull = (group.members || []).length >= (group.capacity || 10);
+        const isFull = (group.members || []).length >= capacity;
         const badgeText = isFull ? 'FULL' : 'OPEN';
         const badgeColor = isFull ? PDF_COLORS.dangerText : PDF_COLORS.successText;
         const badgeWidth = 44;
@@ -1958,7 +2416,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
 
         y += headerHeight + 8;
 
-        // Table header — light gray background, dark text
         doc.save();
         doc.rect(contentLeft, y, contentWidth, 22).fill(PDF_COLORS.bgMedium);
         doc.restore();
@@ -1978,12 +2435,10 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         const rowHeight = 22;
         ensureSpace(rowHeight + 2);
 
-        // Row background — muted
         if (isLeader) {
           doc.save();
           doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.bgLight);
           doc.restore();
-          // Thin left accent bar
           doc.save();
           doc.rect(contentLeft, y, 2, rowHeight).fill(PDF_COLORS.textDark);
           doc.restore();
@@ -1995,7 +2450,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
 
         const cellY = y + 7;
 
-        // Index
         doc.fontSize(9).font('Helvetica').fillColor(PDF_COLORS.text);
         doc.text(String(idx), colX.idx + 4, cellY, {
           width: colWidths.idx - 8,
@@ -2004,7 +2458,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        // REG NO — bold dark
         doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
         doc.text(m.regNo || '', colX.regNo + 6, cellY, {
           width: colWidths.regNo - 8,
@@ -2013,7 +2466,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        // NAME — bold if leader
         doc.font(isLeader ? 'Helvetica-Bold' : 'Helvetica').fillColor(PDF_COLORS.text);
         doc.text(m.name || '', colX.name + 6, cellY, {
           width: colWidths.name - 8,
@@ -2022,7 +2474,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        // PHONE — gray
         doc.font('Helvetica').fillColor(PDF_COLORS.textMuted);
         doc.text(m.phone || '', colX.phone + 6, cellY, {
           width: colWidths.phone - 8,
@@ -2031,7 +2482,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           ellipsis: true,
         });
 
-        // ROLE
         if (isLeader) {
           doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
           doc.text('GROUP LEADER', colX.role + 6, cellY, {
@@ -2050,7 +2500,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
           });
         }
 
-        // Bottom border
         doc.save();
         doc
           .moveTo(contentLeft, y + rowHeight)
@@ -2097,37 +2546,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
         });
       }
 
-      // Footers on every page
-      const range = doc.bufferedPageRange();
-      const totalPages = range.count;
-      for (let i = 0; i < totalPages; i++) {
-        doc.switchToPage(range.start + i);
-        const footerY = pageHeight - 40;
-
-        doc.save();
-        doc
-          .moveTo(contentLeft, footerY - 8)
-          .lineTo(contentRight, footerY - 8)
-          .strokeColor(PDF_COLORS.borderLight)
-          .lineWidth(0.5)
-          .stroke();
-        doc.restore();
-
-        doc.fontSize(7.5).font('Helvetica').fillColor(PDF_COLORS.textMuted);
-        doc.text(
-          'Physics Education Groups  •  Confidential administrative document',
-          contentLeft,
-          footerY,
-          { width: contentWidth * 0.7, align: 'left', lineBreak: false }
-        );
-        doc.text(
-          `Page ${i + 1} of ${totalPages}`,
-          contentLeft + contentWidth * 0.7,
-          footerY,
-          { width: contentWidth * 0.3, align: 'right', lineBreak: false }
-        );
-      }
-
+      pdfDrawFooter(doc, { pageWidth, pageHeight, contentWidth });
       doc.end();
     } catch (err) {
       reject(err);
@@ -2135,7 +2554,266 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle }) {
   });
 }
 
-// ---------- Admin PDF: all groups ----------
+/* ----------------------------------------------------------------
+ * PDF #2 — Paid members only (reconciliation document)
+ * ---------------------------------------------------------------- */
+function buildPaidMembersPdf({ rows, reportTitle, reportSubtitle }) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        size: PDF_LAYOUT.pageSize,
+        margins: {
+          top: PDF_LAYOUT.margin,
+          bottom: PDF_LAYOUT.margin + 20,
+          left: PDF_LAYOUT.margin,
+          right: PDF_LAYOUT.margin,
+        },
+        bufferPages: true,
+        autoFirstPage: false,
+        info: {
+          Title: reportTitle,
+          Author: 'Physics Education Groups',
+          Subject: 'Paid Members',
+          Creator: 'Physics Education Groups',
+        },
+      });
+
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', (err) => reject(err));
+
+      doc.addPage();
+
+      const pageWidth = (doc.page && doc.page.width) || A4_WIDTH;
+      const pageHeight = (doc.page && doc.page.height) || A4_HEIGHT;
+      const contentWidth = pageWidth - PDF_LAYOUT.margin * 2;
+      const contentLeft = PDF_LAYOUT.margin;
+      const contentRight = pageWidth - PDF_LAYOUT.margin;
+
+      const totals = {
+        count: rows.length,
+        totalAmount: rows.reduce((a, r) => a + (Number(r.paymentAmount) || 0), 0),
+        groups: new Set(rows.map((r) => r.groupName)).size,
+      };
+
+      // Column layout: # / Group / RegNo / Name / Phone / M-Pesa / Amount / Note / Paid At
+      const rawCols = {
+        idx: 22,
+        group: 92,
+        regNo: 66,
+        name: 100,
+        phone: 66,
+        mpesa: 60,
+        amount: 40,
+        note: 80,
+        paidAt: 72,
+      };
+      const totalRaw = Object.values(rawCols).reduce((a, b) => a + b, 0);
+      const scale = contentWidth / totalRaw;
+      const colWidths = {};
+      let accum = 0;
+      const colX = {};
+      for (const [key, w] of Object.entries(rawCols)) {
+        colX[key] = contentLeft + accum * scale;
+        colWidths[key] = w * scale;
+        accum += w;
+      }
+
+      pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle });
+
+      let y = 92;
+
+      if (reportSubtitle) {
+        doc.fontSize(10).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
+        doc.text(reportSubtitle, contentLeft, y, { width: contentWidth, align: 'left' });
+        y += 16;
+      }
+
+      const summaryBoxHeight = 62;
+      doc.save();
+      doc
+        .roundedRect(contentLeft, y, contentWidth, summaryBoxHeight, 4)
+        .fillAndStroke(PDF_COLORS.bgSubtle, PDF_COLORS.border);
+      doc.restore();
+
+      const summaryItems = [
+        { label: 'PAID MEMBERS', value: String(totals.count) },
+        { label: 'GROUPS WITH PAYMENTS', value: String(totals.groups) },
+        { label: 'TOTAL AMOUNT (KSH)', value: String(totals.totalAmount) },
+        { label: 'REPORT TYPE', value: 'PAID' },
+      ];
+      const itemWidth = contentWidth / summaryItems.length;
+      summaryItems.forEach((item, i) => {
+        const ix = contentLeft + i * itemWidth + 14;
+        doc.fontSize(7.5).font('Helvetica-Bold').fillColor(PDF_COLORS.textMuted);
+        doc.text(item.label, ix, y + 12, { width: itemWidth - 20, align: 'left' });
+        doc.fontSize(17).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
+        doc.text(item.value, ix, y + 26, { width: itemWidth - 20, align: 'left' });
+      });
+
+      y += summaryBoxHeight + 22;
+
+      function ensureSpace(needed) {
+        if (y + needed > pageHeight - PDF_LAYOUT.margin - PDF_LAYOUT.footerHeight + 10) {
+          doc.addPage();
+          pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle });
+          y = 92;
+        }
+      }
+
+      // Table header
+      ensureSpace(40);
+      doc.save();
+      doc.rect(contentLeft, y, contentWidth, 22).fill(PDF_COLORS.bgMedium);
+      doc.restore();
+
+      const headerY = y + 7;
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
+      doc.text('#', colX.idx + 3, headerY, { width: colWidths.idx - 6, align: 'left', lineBreak: false });
+      doc.text('GROUP', colX.group + 4, headerY, { width: colWidths.group - 8, align: 'left', lineBreak: false });
+      doc.text('REG NO', colX.regNo + 4, headerY, { width: colWidths.regNo - 8, align: 'left', lineBreak: false });
+      doc.text('NAME', colX.name + 4, headerY, { width: colWidths.name - 8, align: 'left', lineBreak: false });
+      doc.text('PHONE', colX.phone + 4, headerY, { width: colWidths.phone - 8, align: 'left', lineBreak: false });
+      doc.text('M-PESA', colX.mpesa + 4, headerY, { width: colWidths.mpesa - 8, align: 'left', lineBreak: false });
+      doc.text('KSH', colX.amount + 4, headerY, { width: colWidths.amount - 8, align: 'left', lineBreak: false });
+      doc.text('NOTE', colX.note + 4, headerY, { width: colWidths.note - 8, align: 'left', lineBreak: false });
+      doc.text('PAID AT', colX.paidAt + 4, headerY, { width: colWidths.paidAt - 8, align: 'left', lineBreak: false });
+      y += 22;
+
+      function drawRow(r, idx) {
+        const rowHeight = 24;
+        ensureSpace(rowHeight + 2);
+
+        if (idx % 2 === 1) {
+          doc.save();
+          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.bgSubtle);
+          doc.restore();
+        }
+
+        const cellY = y + 8;
+        doc.fontSize(8).font('Helvetica').fillColor(PDF_COLORS.text);
+
+        doc.text(String(idx), colX.idx + 3, cellY, {
+          width: colWidths.idx - 6,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.text(r.groupName || '', colX.group + 4, cellY, {
+          width: colWidths.group - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
+        doc.text(r.regNo || '', colX.regNo + 4, cellY, {
+          width: colWidths.regNo - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.font('Helvetica').fillColor(PDF_COLORS.text);
+        doc.text(r.name || '', colX.name + 4, cellY, {
+          width: colWidths.name - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.fillColor(PDF_COLORS.textMuted);
+        doc.text(r.phone || '', colX.phone + 4, cellY, {
+          width: colWidths.phone - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
+        doc.text(r.mpesaCode || '', colX.mpesa + 4, cellY, {
+          width: colWidths.mpesa - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.font('Helvetica').fillColor(PDF_COLORS.text);
+        doc.text(r.paymentAmount != null ? String(r.paymentAmount) : '', colX.amount + 4, cellY, {
+          width: colWidths.amount - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.fillColor(PDF_COLORS.textMuted);
+        doc.text(r.paymentNote || '', colX.note + 4, cellY, {
+          width: colWidths.note - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.fontSize(7.5).fillColor(PDF_COLORS.textMuted);
+        doc.text(r.paymentSubmittedAt ? pdfFmtShort(r.paymentSubmittedAt) : '', colX.paidAt + 4, cellY + 1, {
+          width: colWidths.paidAt - 8,
+          align: 'left',
+          lineBreak: false,
+          ellipsis: true,
+        });
+
+        doc.save();
+        doc
+          .moveTo(contentLeft, y + rowHeight)
+          .lineTo(contentRight, y + rowHeight)
+          .strokeColor(PDF_COLORS.borderLight)
+          .lineWidth(0.4)
+          .stroke();
+        doc.restore();
+
+        y += rowHeight;
+      }
+
+      if (rows.length === 0) {
+        doc.fontSize(11).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
+        doc.text('No paid members have been recorded yet.', contentLeft, y + 20, {
+          width: contentWidth,
+          align: 'center',
+        });
+      } else {
+        rows.forEach((r, i) => drawRow(r, i + 1));
+
+        // Bottom summary line
+        y += 12;
+        ensureSpace(30);
+        doc.save();
+        doc
+          .moveTo(contentLeft, y)
+          .lineTo(contentRight, y)
+          .strokeColor(PDF_COLORS.border)
+          .lineWidth(0.7)
+          .stroke();
+        doc.restore();
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
+        doc.text(
+          `Total paid: ${totals.count} member(s)  •  Total collected: KSH ${totals.totalAmount}`,
+          contentLeft,
+          y + 8,
+          { width: contentWidth, align: 'right' }
+        );
+      }
+
+      pdfDrawFooter(doc, { pageWidth, pageHeight, contentWidth });
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// ---------- Admin PDF: all groups (clean, no payment info) ----------
 app.get(
   '/api/admin/export/pdf',
   requireAdmin,
@@ -2155,6 +2833,8 @@ app.get(
         String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
       );
 
+      const maxGroupMembers = await getMaxGroupMembers();
+
       const groupsWithMembers = [];
       for (const g of groups) {
         const members = await Member.find({ group: g._id })
@@ -2166,7 +2846,7 @@ app.get(
           id: String(g._id),
           name: g.name,
           memberCount: g.memberCount,
-          capacity: CONFIG.MAX_GROUP_MEMBERS,
+          capacity: maxGroupMembers,
           leaderName: leader ? leader.name : null,
           leaderRegNo: leader ? leader.regNo : null,
           members: members.map((m) => ({
@@ -2185,6 +2865,7 @@ app.get(
         reportSubtitle: `All Physics Education groups and their members (${groupsWithMembers.length} group${
           groupsWithMembers.length === 1 ? '' : 's'
         }).`,
+        maxGroupMembers,
       });
 
       const filename = `physics-education-groups-complete-${new Date()
@@ -2207,6 +2888,70 @@ app.get(
   })
 );
 
+// ---------- Admin PDF: PAID members only ----------
+app.get(
+  '/api/admin/export/paid/pdf',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    try {
+      const paidMembers = await Member.find({
+        mpesaCode: { $type: 'string', $ne: '' },
+      })
+        .populate('group', 'name normalizedName')
+        .lean();
+
+      // Sort by group name, then payment date (earliest first)
+      paidMembers.sort((a, b) => {
+        const ga = (a.group && a.group.name ? a.group.name : '').toLowerCase();
+        const gb = (b.group && b.group.name ? b.group.name : '').toLowerCase();
+        if (ga < gb) return -1;
+        if (ga > gb) return 1;
+        const pa = a.paymentSubmittedAt ? new Date(a.paymentSubmittedAt).getTime() : 0;
+        const pb = b.paymentSubmittedAt ? new Date(b.paymentSubmittedAt).getTime() : 0;
+        if (pa !== pb) return pa - pb;
+        return String(a.regNo).localeCompare(String(b.regNo));
+      });
+
+      const rows = paidMembers.map((m) => ({
+        groupName: m.group ? m.group.name : '',
+        regNo: m.regNo,
+        name: m.name,
+        phone: m.phone,
+        mpesaCode: m.mpesaCode || '',
+        paymentAmount: m.paymentAmount != null ? m.paymentAmount : null,
+        paymentNote: m.paymentNote || '',
+        paymentSubmittedAt: m.paymentSubmittedAt || null,
+        isLeader: Boolean(m.isLeader),
+      }));
+
+      const pdfBuffer = await buildPaidMembersPdf({
+        rows,
+        reportTitle: 'Paid Members — Reconciliation Report',
+        reportSubtitle: `Only members who have submitted an M-Pesa confirmation code (${rows.length} record${
+          rows.length === 1 ? '' : 's'
+        }).`,
+      });
+
+      const filename = `physics-education-groups-paid-${new Date()
+        .toISOString()
+        .slice(0, 10)}.pdf`;
+
+      console.log(
+        `[admin] PAID PDF export generated (${rows.length} paid members, ${pdfBuffer.length} bytes)`
+      );
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', String(pdfBuffer.length));
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).end(pdfBuffer);
+    } catch (pdfErr) {
+      console.error('[admin-paid-pdf] ERROR:', pdfErr && pdfErr.stack ? pdfErr.stack : pdfErr);
+      throw pdfErr;
+    }
+  })
+);
+
 // ---------- Member PDF: own group only ----------
 app.get(
   '/api/member/export/pdf',
@@ -2222,10 +2967,13 @@ app.get(
         return fail(res, 'Group not found.', 'NOT_FOUND', 404);
       }
 
-      const members = await Member.find({ group: group._id })
-        .sort({ isLeader: -1, createdAt: 1, _id: 1 })
-        .select('regNo name phone isLeader createdAt')
-        .lean();
+      const [members, maxGroupMembers] = await Promise.all([
+        Member.find({ group: group._id })
+          .sort({ isLeader: -1, createdAt: 1, _id: 1 })
+          .select('regNo name phone isLeader createdAt')
+          .lean(),
+        getMaxGroupMembers(),
+      ]);
 
       const leader = members.find((m) => m.isLeader) || null;
 
@@ -2235,7 +2983,7 @@ app.get(
             id: String(group._id),
             name: group.name,
             memberCount: group.memberCount,
-            capacity: CONFIG.MAX_GROUP_MEMBERS,
+            capacity: maxGroupMembers,
             leaderName: leader ? leader.name : null,
             leaderRegNo: leader ? leader.regNo : null,
             members: members.map((m) => ({
@@ -2249,6 +2997,7 @@ app.get(
         ],
         reportTitle: 'Group Member Directory',
         reportSubtitle: `Group roster for "${group.name}".`,
+        maxGroupMembers,
       });
 
       const safeName =
