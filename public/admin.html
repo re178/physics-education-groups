@@ -139,7 +139,9 @@
       </div>
     </section>
 
-    <!-- Submission status banner -->
+    <!-- ============================================================ -->
+    <!-- SUBMISSION + PAYMENT STATUS BANNER                           -->
+    <!-- ============================================================ -->
     <section class="card card-flat" aria-label="Submission status">
       <div class="submission-status-row">
         <div class="submission-status-info">
@@ -149,10 +151,124 @@
             New students can currently register themselves.
           </span>
         </div>
+        <div class="submission-status-info">
+          <span class="submission-status-label">Payment Proof:</span>
+          <span class="badge badge-member" id="payment-status-pill" aria-live="polite">OFF</span>
+          <span class="muted small" id="payment-status-help">
+            M-Pesa code is not required on registration.
+          </span>
+        </div>
       </div>
     </section>
 
-    <!-- Toolbar -->
+    <!-- ============================================================ -->
+    <!-- LAB MANUAL PAYMENT SETTINGS CARD                             -->
+    <!-- ============================================================ -->
+    <section class="card" aria-labelledby="settings-title">
+      <div class="card-head">
+        <h2 id="settings-title">Lab Manual Payment Settings</h2>
+        <p class="muted">
+          Control whether students must submit an M-Pesa confirmation code when
+          registering, set the amount and phone, and adjust group capacity.
+        </p>
+      </div>
+
+      <form id="settings-form" class="form form-grid" novalidate>
+        <!-- Require Payment Proof toggle -->
+        <div class="field field-checkbox">
+          <label class="checkbox-label" for="setting-require-payment">
+            <input
+              type="checkbox"
+              id="setting-require-payment"
+              name="requirePaymentProof"
+            />
+            <span>Require Payment Proof (M-Pesa code) on registration</span>
+          </label>
+          <p class="help">
+            When ON, students must paste their 10-character M-Pesa
+            confirmation code and note the time &amp; day they paid.
+          </p>
+        </div>
+
+        <!-- Payment Amount -->
+        <div class="field">
+          <label for="setting-payment-amount">
+            Payment Amount (KSH) <span class="req" aria-hidden="true">*</span>
+          </label>
+          <input
+            id="setting-payment-amount"
+            name="paymentAmount"
+            type="number"
+            inputmode="numeric"
+            min="0"
+            max="100000"
+            step="1"
+            value="45"
+            required
+          />
+          <p class="field-error" data-error-for="setting-payment-amount" hidden></p>
+        </div>
+
+        <!-- Payment Phone -->
+        <div class="field">
+          <label for="setting-payment-phone">
+            Payment Phone (Pochi) <span class="req" aria-hidden="true">*</span>
+          </label>
+          <input
+            id="setting-payment-phone"
+            name="paymentPhone"
+            type="tel"
+            inputmode="tel"
+            maxlength="20"
+            value="0741742291"
+            required
+          />
+          <p class="help">
+            Kenyan numbers only (07…, 01…, 2547…, 2541…, or +2547…).
+          </p>
+          <p class="field-error" data-error-for="setting-payment-phone" hidden></p>
+        </div>
+
+        <!-- Max Group Members -->
+        <div class="field">
+          <label for="setting-max-members">
+            Max Members per Group <span class="req" aria-hidden="true">*</span>
+          </label>
+          <input
+            id="setting-max-members"
+            name="maxGroupMembers"
+            type="number"
+            inputmode="numeric"
+            min="1"
+            max="20"
+            step="1"
+            value="10"
+            required
+          />
+          <p class="help" id="setting-max-help">
+            Between 1 and 20. Applies to new registrations only — existing
+            groups keep their members.
+          </p>
+          <p class="field-error" data-error-for="setting-max-members" hidden></p>
+        </div>
+
+        <div class="form-actions span-full">
+          <button type="submit" class="btn btn-primary" id="settings-save-btn">
+            <span class="btn-label">Save Settings</span>
+            <span class="btn-spinner" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="btn btn-ghost" id="settings-reset-btn">
+            Reset to saved values
+          </button>
+        </div>
+
+        <p class="muted small span-full" id="settings-saved-at"></p>
+      </form>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- TOOLBAR                                                     -->
+    <!-- ============================================================ -->
     <section class="toolbar">
       <div class="toolbar-left">
         <button type="button" class="btn btn-primary" id="btn-create-group">
@@ -174,6 +290,9 @@
         <a class="btn btn-secondary" href="/api/admin/export/pdf" id="btn-export-pdf">
           ⬇ Download PDF
         </a>
+        <a class="btn btn-secondary" href="/api/admin/export/paid/pdf" id="btn-export-paid-pdf">
+          ⬇ Paid Members PDF
+        </a>
       </div>
     </section>
 
@@ -193,10 +312,11 @@
               <th scope="col">Name</th>
               <th scope="col">Phone</th>
               <th scope="col">Role</th>
+              <th scope="col">Payment</th>
             </tr>
           </thead>
           <tbody id="recent-table-body">
-            <tr><td colspan="6" class="table-empty">Loading…</td></tr>
+            <tr><td colspan="7" class="table-empty">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -274,11 +394,12 @@
               <th scope="col">NAME</th>
               <th scope="col">PHONE NUMBER</th>
               <th scope="col">ROLE</th>
+              <th scope="col">PAYMENT</th>
               <th scope="col">ACTIONS</th>
             </tr>
           </thead>
           <tbody id="group-members-body">
-            <tr><td colspan="6" class="table-empty">Loading…</td></tr>
+            <tr><td colspan="7" class="table-empty">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -321,6 +442,20 @@
         <label for="member-group">Group <span class="req">*</span></label>
         <select id="member-group" name="groupId" required></select>
         <p class="field-error" data-error-for="member-group" hidden></p>
+      </div>
+
+      <!-- Optional payment fields -->
+      <div class="field">
+        <label for="member-mpesa">M-Pesa Code (optional)</label>
+        <input id="member-mpesa" name="mpesaCode" type="text" maxlength="10" autocapitalize="characters" autocomplete="off" placeholder="e.g. QJ71X2Y3Z4" />
+        <p class="help">Leave empty if the member has not paid yet.</p>
+        <p class="field-error" data-error-for="member-mpesa" hidden></p>
+      </div>
+
+      <div class="field">
+        <label for="member-payment-note">Payment Note (optional)</label>
+        <input id="member-payment-note" name="paymentNote" type="text" maxlength="200" autocomplete="off" placeholder="e.g. Paid Mon 23 Sept at 3:45 PM" />
+        <p class="field-error" data-error-for="member-payment-note" hidden></p>
       </div>
 
       <div class="modal-actions">
