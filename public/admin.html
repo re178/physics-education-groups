@@ -9,6 +9,132 @@
 <title>PHYSICS EDUCATION GROUPS — Admin</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%9B%EF%B8%8F%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/style.css" />
+<style>
+  /* Safety net: any element with the [hidden] attribute is truly hidden */
+  [hidden] { display: none !important; }
+
+  /* Paste-verify card */
+  .paste-verify-textarea {
+    width: 100%;
+    min-height: 200px;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: #1f2937;
+    background: #f9fafb;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    resize: vertical;
+    -webkit-appearance: none;
+    appearance: none;
+    min-height: 44px;
+  }
+  .paste-verify-textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+    background: #fff;
+  }
+  .paste-verify-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-top: 12px;
+  }
+  .paste-verify-hint {
+    margin: 8px 0 0;
+    font-size: 0.85rem;
+    color: #6b7280;
+  }
+  .verify-results {
+    margin-top: 20px;
+    padding: 16px 18px;
+    border-radius: 8px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+  }
+  .verify-results-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+    margin-bottom: 12px;
+  }
+  @media (min-width: 640px) {
+    .verify-results-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+  .verify-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .verify-stat-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #6b7280;
+    font-weight: 600;
+  }
+  .verify-stat-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #0b3d91;
+  }
+  .verify-stat-value.is-good { color: #15803d; }
+  .verify-stat-value.is-warn { color: #b45309; }
+  .verify-stat-value.is-bad { color: #b91c1c; }
+
+  .verify-list {
+    margin: 0 0 12px;
+    padding: 0;
+    list-style: none;
+  }
+  .verify-list li {
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    margin-bottom: 4px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+  }
+  .verify-list li.is-verified { border-left: 3px solid #15803d; }
+  .verify-list li.is-already  { border-left: 3px solid #0b3d91; background: #e7eefb; }
+  .verify-list li.is-unmatched{ border-left: 3px solid #b45309; background: #fef9c3; }
+  .verify-list li.is-ambiguous{ border-left: 3px solid #b91c1c; background: #fdeaea; }
+  .verify-code {
+    display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #eef2ff;
+    color: #0b3d91;
+    font-size: 0.82rem;
+  }
+  .verify-subhead {
+    margin: 14px 0 6px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1f2937;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Pending payments card */
+  .pending-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* Payment stat tile */
+  .payment-tile-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+</style>
 </head>
 <body class="page page-admin">
 
@@ -139,6 +265,26 @@
       </div>
     </section>
 
+    <!-- Payment tiles -->
+    <section class="stat-grid" aria-label="Payment totals">
+      <div class="stat">
+        <span class="stat-label">Paid (Verified)</span>
+        <span class="stat-value" id="stat-paid" style="color:#15803d;">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Pending Payments</span>
+        <span class="stat-value" id="stat-pending" style="color:#b45309;">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Rejected Payments</span>
+        <span class="stat-value" id="stat-rejected" style="color:#b91c1c;">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Unpaid Members</span>
+        <span class="stat-value" id="stat-unpaid">0</span>
+      </div>
+    </section>
+
     <!-- ============================================================ -->
     <!-- SUBMISSION + PAYMENT STATUS BANNER                           -->
     <!-- ============================================================ -->
@@ -162,6 +308,100 @@
     </section>
 
     <!-- ============================================================ -->
+    <!-- PASTE-AND-VERIFY M-PESA MESSAGES CARD                        -->
+    <!-- ============================================================ -->
+    <section class="card" aria-labelledby="paste-verify-title">
+      <div class="card-head">
+        <h2 id="paste-verify-title">Paste M-Pesa Messages to Verify</h2>
+        <p class="muted">
+          Paste the M-Pesa confirmation message(s) you received. The system extracts
+          the codes, matches them to members, and marks them as verified.
+          After success the box clears — ready for the next paste.
+        </p>
+      </div>
+
+      <form id="paste-verify-form" class="form" novalidate>
+        <div class="field">
+          <label for="paste-verify-text">
+            M-Pesa messages <span class="req" aria-hidden="true">*</span>
+          </label>
+          <textarea
+            id="paste-verify-text"
+            name="text"
+            class="paste-verify-textarea"
+            placeholder="Paste one or more M-Pesa SMS messages here. Example:&#10;QJ71X2Y3Z4 Confirmed. Ksh45.00 sent to POCHI LA BIASHARA 0741742291 on 23/9/25 at 3:45 PM.&#10;New M-PESA balance is Ksh1,234.00."
+            spellcheck="false"
+            autocomplete="off"
+            required
+          ></textarea>
+          <p class="paste-verify-hint">
+            Tip: you can paste several messages at once. Each 10-character code
+            is matched to a member whose M-Pesa code or phone number matches.
+          </p>
+          <p class="field-error" data-error-for="paste-verify-text" hidden></p>
+        </div>
+
+        <div class="paste-verify-actions">
+          <button type="submit" class="btn btn-primary" id="paste-verify-btn">
+            <span class="btn-label">Extract &amp; Verify</span>
+            <span class="btn-spinner" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="btn btn-ghost" id="paste-verify-clear-btn">
+            Clear
+          </button>
+        </div>
+      </form>
+
+      <!-- Results panel -->
+      <div id="paste-verify-results" class="verify-results" hidden></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- PENDING PAYMENTS CARD                                        -->
+    <!-- ============================================================ -->
+    <section class="card" aria-labelledby="pending-title">
+      <div class="card-head">
+        <h2 id="pending-title">Pending Payments</h2>
+        <p class="muted">
+          Members whose M-Pesa code has not yet been verified.
+          Verify or reject each one after checking your M-Pesa statement.
+        </p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table" id="pending-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Group</th>
+              <th scope="col">REG NO</th>
+              <th scope="col">Name</th>
+              <th scope="col">Phone</th>
+              <th scope="col">M-Pesa Code</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Note</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="pending-table-body">
+            <tr><td colspan="10" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="toolbar" style="margin-top:16px;">
+        <div class="toolbar-left"></div>
+        <div class="toolbar-right">
+          <button type="button" class="btn btn-ghost" id="btn-refresh-pending">
+            <span class="btn-label">Refresh Pending</span>
+            <span class="btn-spinner" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
     <!-- LAB MANUAL PAYMENT SETTINGS CARD                             -->
     <!-- ============================================================ -->
     <section class="card" aria-labelledby="settings-title">
@@ -174,7 +414,6 @@
       </div>
 
       <form id="settings-form" class="form form-grid" novalidate>
-        <!-- Require Payment Proof toggle -->
         <div class="field field-checkbox">
           <label class="checkbox-label" for="setting-require-payment">
             <input
@@ -190,7 +429,6 @@
           </p>
         </div>
 
-        <!-- Payment Amount -->
         <div class="field">
           <label for="setting-payment-amount">
             Payment Amount (KSH) <span class="req" aria-hidden="true">*</span>
@@ -209,7 +447,6 @@
           <p class="field-error" data-error-for="setting-payment-amount" hidden></p>
         </div>
 
-        <!-- Payment Phone -->
         <div class="field">
           <label for="setting-payment-phone">
             Payment Phone (Pochi) <span class="req" aria-hidden="true">*</span>
@@ -229,7 +466,6 @@
           <p class="field-error" data-error-for="setting-payment-phone" hidden></p>
         </div>
 
-        <!-- Max Group Members -->
         <div class="field">
           <label for="setting-max-members">
             Max Members per Group <span class="req" aria-hidden="true">*</span>
@@ -444,7 +680,6 @@
         <p class="field-error" data-error-for="member-group" hidden></p>
       </div>
 
-      <!-- Optional payment fields -->
       <div class="field">
         <label for="member-mpesa">M-Pesa Code (optional)</label>
         <input id="member-mpesa" name="mpesaCode" type="text" maxlength="10" autocapitalize="characters" autocomplete="off" placeholder="e.g. QJ71X2Y3Z4" />
