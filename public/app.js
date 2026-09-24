@@ -1,16 +1,14 @@
 /* ============================================================
  * PHYSICS EDUCATION GROUPS — public/app.js
  * ------------------------------------------------------------
- * Version: 1.4.0
+ * Version: 1.5.0
  *
- * Additions in this version:
- *   - Runtime CSS injection (payment + settings + notice classes)
- *   - Register page: payment-config check, dynamic field reveal
- *   - Admin page: settings form, payment column, SSE settings sync
- *   - Member modal: optional mpesaCode + paymentNote fields
- *   - Dashboard stat tiles: paid / unpaid counts
+ * Handles the register page, member portal, and admin portal.
+ * Auto-detects which page it's on by the presence of unique
+ * form IDs and runs the matching initializer.
  *
- * All previously working features remain intact.
+ * No inline scripts required (CSP-safe). All styles are inline
+ * in each HTML file — this file only injects behaviour.
  * ============================================================ */
 'use strict';
 
@@ -24,131 +22,7 @@
   const CSRF_HEADER = 'X-CSRF-Token';
 
   /* ============================================================
-   * 1. Runtime style injection
-   * ------------------------------------------------------------
-   * We add the few new classes used by the payment + settings UI
-   * here, so that style.css does not need to be replaced.
-   * ============================================================ */
-  (function injectStyles() {
-    if (document.getElementById('peg-app-styles')) return;
-    const css = `
-      .submission-status-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 14px 32px;
-        align-items: center;
-      }
-      .submission-status-info {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px 10px;
-        align-items: center;
-      }
-      .submission-status-label {
-        font-weight: 600;
-        color: #1f2937;
-        font-size: 0.9rem;
-      }
-      .form-grid {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 16px;
-      }
-      @media (min-width: 640px) {
-        .form-grid { grid-template-columns: 1fr 1fr; }
-      }
-      .span-full { grid-column: 1 / -1; }
-      .field-checkbox {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .checkbox-label {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 0.95rem;
-      }
-      .checkbox-label input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
-        min-height: 0;
-        margin: 0;
-        accent-color: #0b3d91;
-        cursor: pointer;
-      }
-      .payment-body { display: flex; flex-direction: column; gap: 12px; }
-      .payment-instructions p { margin: 0 0 8px; }
-      .payment-phone-line { font-size: 1.05rem; }
-      .payment-phone {
-        font-weight: 700;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        letter-spacing: 0.02em;
-        color: #0b3d91;
-      }
-      .payment-note-box {
-        background: #fef9c3;
-        border: 1px solid #fde68a;
-        border-radius: 8px;
-        padding: 12px 14px;
-        margin: 12px 0;
-      }
-      .payment-note-title {
-        font-weight: 700;
-        color: #854d0e;
-        margin: 0 0 6px;
-      }
-      .payment-note-list {
-        margin: 0 0 8px 18px;
-        padding: 0;
-      }
-      .payment-note-list li { margin-bottom: 2px; }
-      .lab-manual-notice {
-        background: #e7eefb;
-        border: 1px solid #cfdcf4;
-        border-left: 4px solid #0b3d91;
-        border-radius: 8px;
-        padding: 14px 16px;
-        margin: 8px 0;
-      }
-      .lab-manual-title {
-        margin: 0 0 6px;
-        color: #0b3d91;
-        font-size: 1.05rem;
-      }
-      .lab-manual-notice p {
-        margin: 0 0 6px;
-        font-size: 0.93rem;
-      }
-      .payment-cell { min-width: 100px; }
-      .payment-cell .badge { font-size: 0.68rem; }
-      .payment-cell .payment-mpesa-code {
-        display: block;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 0.7rem;
-        color: #6b7280;
-        margin-top: 2px;
-        word-break: break-all;
-      }
-      .payment-cell .payment-note-line {
-        display: block;
-        font-size: 0.72rem;
-        color: #6b7280;
-        margin-top: 2px;
-        white-space: normal;
-        word-break: break-word;
-      }
-    `;
-    const style = document.createElement('style');
-    style.id = 'peg-app-styles';
-    style.textContent = css;
-    document.head.appendChild(style);
-  })();
-
-  /* ============================================================
-   * 2. Small utilities
+   * 1. Small utilities
    * ============================================================ */
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -201,8 +75,14 @@
     } catch (_) { return ''; }
   };
 
+  const truncate = (s, n = 60) => {
+    if (s == null) return '';
+    const str = String(s);
+    return str.length <= n ? str : str.slice(0, n - 1) + '…';
+  };
+
   /* ============================================================
-   * 3. Device fingerprint (persistent per browser)
+   * 2. Device fingerprint
    * ============================================================ */
   const Device = (function () {
     const uuid = () => {
@@ -273,22 +153,14 @@
       };
     }
 
-    return {
-      getId: loadOrCreateId,
-      getMetadata: collectMetadata,
-    };
+    return { getId: loadOrCreateId, getMetadata: collectMetadata };
   })();
 
   /* ============================================================
-   * 4. Alerts
+   * 3. Alerts
    * ============================================================ */
   const Alert = (function () {
-    const ICONS = {
-      success: '✓',
-      error: '✕',
-      warning: '⚠',
-      info: 'ℹ',
-    };
+    const ICONS = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
 
     function render(type, message, opts = {}) {
       const region = document.getElementById('alert-region');
@@ -305,25 +177,18 @@
       ]);
 
       if (dismissible) {
-        const close = el('button', {
+        node.appendChild(el('button', {
           type: 'button',
           class: 'alert-dismiss',
           'aria-label': 'Dismiss',
           onClick: () => node.remove(),
-        }, ['×']);
-        node.appendChild(close);
+        }, ['×']));
       }
 
       region.appendChild(node);
-
-      if (timeout > 0) {
-        setTimeout(() => {
-          if (node.parentNode) node.remove();
-        }, timeout);
-      }
+      if (timeout > 0) setTimeout(() => { if (node.parentNode) node.remove(); }, timeout);
 
       try { node.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
-
       return node;
     }
 
@@ -342,13 +207,12 @@
       error: (m, o) => render('error', m, o),
       warning: (m, o) => render('warning', m, o),
       info: (m, o) => render('info', m, o),
-      clear,
-      isShowing,
+      clear, isShowing,
     };
   })();
 
   /* ============================================================
-   * 5. Modal helpers
+   * 4. Modal helpers
    * ============================================================ */
   const Modal = (function () {
     function open(id) {
@@ -425,7 +289,7 @@
   })();
 
   /* ============================================================
-   * 6. API helper (with CSRF)
+   * 5. API helper (with CSRF)
    * ============================================================ */
   let csrfTokenCache = null;
   let csrfFetchPromise = null;
@@ -459,10 +323,7 @@
     const method = (options.method || 'GET').toUpperCase();
     const isMutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
 
-    const headers = Object.assign(
-      { Accept: 'application/json' },
-      options.headers || {}
-    );
+    const headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
 
     let body = options.body;
     if (body !== undefined && body !== null && !(body instanceof FormData) && typeof body !== 'string') {
@@ -478,13 +339,9 @@
     let res;
     try {
       res = await fetch(path, {
-        method,
-        headers,
-        body,
-        credentials: 'same-origin',
-        cache: 'no-store',
+        method, headers, body, credentials: 'same-origin', cache: 'no-store',
       });
-    } catch (networkErr) {
+    } catch (_) {
       return {
         ok: false,
         status: 0,
@@ -522,7 +379,7 @@
   }
 
   /* ============================================================
-   * 7. Button loading helper
+   * 6. Button loading helper
    * ============================================================ */
   function withLoading(btn, asyncFn) {
     return async (...args) => {
@@ -540,19 +397,14 @@
   }
 
   /* ============================================================
-   * 8. Field-level error display
+   * 7. Field-level error display
    * ============================================================ */
   function setFieldError(fieldName, message) {
     const errNode = document.querySelector(`[data-error-for="${fieldName}"]`);
     const input = document.getElementById(fieldName);
     if (errNode) {
-      if (message) {
-        errNode.textContent = message;
-        errNode.hidden = false;
-      } else {
-        errNode.textContent = '';
-        errNode.hidden = true;
-      }
+      if (message) { errNode.textContent = message; errNode.hidden = false; }
+      else { errNode.textContent = ''; errNode.hidden = true; }
     }
     if (input) {
       if (message) input.setAttribute('aria-invalid', 'true');
@@ -567,7 +419,7 @@
   }
 
   /* ============================================================
-   * 9. Show / hide password toggles
+   * 8. Show / hide password toggles
    * ============================================================ */
   function wireVisibilityToggles() {
     $$('[data-toggle-for]').forEach((btn) => {
@@ -584,17 +436,30 @@
   }
 
   /* ============================================================
-   * 10. Payment cell renderer (used by admin tables)
+   * 9. Payment cell renderer (used by admin tables)
    * ============================================================ */
   function buildPaymentCell(member) {
     const td = el('td', { class: 'payment-cell' });
+    const status = member && member.paymentStatus ? member.paymentStatus : null;
     const code = member && member.mpesaCode ? String(member.mpesaCode) : '';
 
-    if (code) {
+    if (status === 'verified') {
       td.appendChild(el('span', { class: 'badge badge-open', text: 'PAID' }));
-      td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
+      if (code) td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
       if (member.paymentNote) {
         td.appendChild(el('span', { class: 'payment-note-line', text: member.paymentNote }));
+      }
+    } else if (status === 'pending') {
+      td.appendChild(el('span', { class: 'badge badge-pending', text: 'PENDING' }));
+      if (code) td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
+      if (member.paymentNote) {
+        td.appendChild(el('span', { class: 'payment-note-line', text: member.paymentNote }));
+      }
+    } else if (status === 'rejected') {
+      td.appendChild(el('span', { class: 'badge badge-rejected', text: 'REJECTED' }));
+      if (code) td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
+      if (member.paymentRejectedReason) {
+        td.appendChild(el('span', { class: 'payment-note-line', text: member.paymentRejectedReason }));
       }
     } else {
       td.appendChild(el('span', { class: 'badge badge-member', text: 'UNPAID' }));
@@ -603,7 +468,7 @@
   }
 
   /* ============================================================
-   * 11. REGISTRATION PAGE (index.html)
+   * 10. REGISTRATION PAGE (index.html)
    * ============================================================ */
   function initRegisterPage() {
     const form = document.getElementById('register-form');
@@ -625,7 +490,7 @@
     const fieldPaymentNote = document.getElementById('field-payment-note');
     const heroCapacity = document.getElementById('hero-capacity');
 
-    // Runtime state
+    // Runtime state derived from /api/payment-config
     const state = {
       registrationOpen: true,
       requirePaymentProof: false,
@@ -643,25 +508,14 @@
       if (cfg.paymentPhone) state.paymentPhone = String(cfg.paymentPhone);
       if (cfg.maxGroupMembers != null) state.maxGroupMembers = Number(cfg.maxGroupMembers) || state.maxGroupMembers;
 
-      // Capacity hint in hero
       if (heroCapacity) heroCapacity.textContent = `${state.maxGroupMembers} members`;
-
-      // Payment card + fields
-      if (paymentCard) {
-        paymentCard.hidden = !state.requirePaymentProof;
-      }
-      if (fieldMpesa) {
-        fieldMpesa.hidden = !state.requirePaymentProof;
-      }
-      if (fieldPaymentNote) {
-        fieldPaymentNote.hidden = !state.requirePaymentProof;
-      }
-
-      // Displayed amount + phone
+      if (paymentCard) paymentCard.hidden = !state.requirePaymentProof;
+      if (fieldMpesa) fieldMpesa.hidden = !state.requirePaymentProof;
+      if (fieldPaymentNote) fieldPaymentNote.hidden = !state.requirePaymentProof;
       if (paymentAmountSpan) paymentAmountSpan.textContent = String(state.paymentAmount);
       if (paymentPhoneSpan) paymentPhoneSpan.textContent = state.paymentPhone;
 
-      // Registration-open notice handling
+      // Registration closed notice
       const existingNotice = document.getElementById('registration-closed-notice');
       const formWrap = form.closest('.card');
 
@@ -688,14 +542,13 @@
       }
     }
 
-    // Fetch config on load
+    // Fetch config on load.
     (async () => {
       try {
         const { ok, data } = await api('/api/payment-config');
         if (ok && data && data.success) {
           applyConfig(data);
         } else {
-          // Fall back to status-only check
           const statusRes = await api('/api/registration-status');
           if (statusRes.ok && statusRes.data && typeof statusRes.data.open === 'boolean') {
             applyConfig({ registrationOpen: statusRes.data.open });
@@ -718,10 +571,7 @@
       Alert.clear();
 
       if (!state.registrationOpen) {
-        Alert.warning(
-          'Registration is currently closed. Please check back later.',
-          { title: 'Registration closed' }
-        );
+        Alert.warning('Registration is currently closed. Please check back later.', { title: 'Registration closed' });
         return;
       }
 
@@ -740,7 +590,6 @@
       else if (name.trim().length < 2) { setFieldError('name', 'Full name is too short.'); hasError = true; }
 
       if (!phone.trim()) { setFieldError('phone', 'Phone number is required.'); hasError = true; }
-
       if (!groupName.trim()) { setFieldError('groupName', 'Group name is required.'); hasError = true; }
 
       if (state.requirePaymentProof) {
@@ -750,6 +599,12 @@
           hasError = true;
         } else if (!/^[A-Z0-9]{10}$/.test(code)) {
           setFieldError('mpesaCode', 'Enter the 10-character code from the M-Pesa SMS.');
+          hasError = true;
+        } else if (!/[A-Z]/.test(code) || !/[0-9]/.test(code)) {
+          setFieldError('mpesaCode', 'M-Pesa code must contain both letters and digits.');
+          hasError = true;
+        } else if (/^(.)\1+$/.test(code) || /^(.)\1{4}/.test(code)) {
+          setFieldError('mpesaCode', 'This looks like a fake code. Enter the code from your M-Pesa SMS.');
           hasError = true;
         }
         if (!paymentNote.trim()) {
@@ -776,10 +631,7 @@
         payload.paymentNote = paymentNote.trim();
       }
 
-      const { ok, data } = await api('/api/register', {
-        method: 'POST',
-        body: payload,
-      });
+      const { ok, data } = await api('/api/register', { method: 'POST', body: payload });
 
       if (ok && data && data.success) {
         showSuccess(data);
@@ -795,26 +647,24 @@
       else if (code === 'INVALID_PHONE') setFieldError('phone', message);
       else if (code === 'INVALID_GROUP') setFieldError('groupName', message);
       else if (code === 'DUPLICATE_REGNO') setFieldError('regNo', 'This registration number is already registered.');
+      else if (code === 'INVALID_MPESA_CODE') setFieldError('mpesaCode', message);
+      else if (code === 'DUPLICATE_MPESA_CODE') setFieldError('mpesaCode', message);
       else if (code === 'PAYMENT_REQUIRED') setFieldError('mpesaCode', message);
       else if (code === 'PAYMENT_NOTE_REQUIRED') setFieldError('paymentNote', message);
 
-      if (code === 'DUPLICATE_REGNO') {
-        Alert.warning(message, { title: 'Duplicate registration' });
-      } else if (code === 'GROUP_FULL') {
-        Alert.warning(message, { title: 'Group full' });
-      } else if (code === 'DEVICE_USED') {
-        Alert.warning(message, { title: 'Device already used' });
-      } else if (code === 'REGISTRATION_CLOSED') {
+      if (code === 'DUPLICATE_REGNO') Alert.warning(message, { title: 'Duplicate registration' });
+      else if (code === 'GROUP_FULL') Alert.warning(message, { title: 'Group full' });
+      else if (code === 'DEVICE_USED') Alert.warning(message, { title: 'Device already used' });
+      else if (code === 'DUPLICATE_MPESA_CODE') Alert.warning(message, { title: 'Code already used' });
+      else if (code === 'INVALID_MPESA_CODE') Alert.error(message, { title: 'Invalid M-Pesa code' });
+      else if (code === 'REGISTRATION_CLOSED') {
         state.registrationOpen = false;
         applyConfig({ registrationOpen: false });
         Alert.warning(message, { title: 'Registration closed' });
       } else if (
-        code === 'INVALID_REQNO' ||
-        code === 'INVALID_NAME' ||
-        code === 'INVALID_PHONE' ||
-        code === 'INVALID_GROUP' ||
-        code === 'PAYMENT_REQUIRED' ||
-        code === 'PAYMENT_NOTE_REQUIRED'
+        code === 'INVALID_REQNO' || code === 'INVALID_NAME' ||
+        code === 'INVALID_PHONE' || code === 'INVALID_GROUP' ||
+        code === 'PAYMENT_REQUIRED' || code === 'PAYMENT_NOTE_REQUIRED'
       ) {
         Alert.error(message, { title: 'Check your input' });
       } else if (!Alert.isShowing()) {
@@ -832,6 +682,7 @@
       const anotherBtn = document.getElementById('success-register-another');
 
       if (msgEl) msgEl.textContent = data.message || 'Registration successful.';
+
       if (details) {
         details.innerHTML = '';
         const g = data.group || {};
@@ -844,22 +695,20 @@
           ['Role', m.isLeader ? 'GROUP LEADER' : 'MEMBER'],
           ['Members in Group', `${g.memberCount || 0} / ${g.capacity || state.maxGroupMembers}`],
         ];
-
-        // Show payment info if it was captured
         if (m.mpesaCode) {
           rows.push(['M-Pesa Code', m.mpesaCode]);
           if (m.paymentAmount != null) rows.push(['Amount Paid (KSH)', String(m.paymentAmount)]);
           if (m.paymentNote) rows.push(['Time & Day Paid', m.paymentNote]);
+          if (m.paymentStatus) rows.push(['Payment Status', String(m.paymentStatus).toUpperCase()]);
         }
-
         for (const [k, v] of rows) {
           details.appendChild(el('dt', { text: k }));
           details.appendChild(el('dd', { text: String(v) }));
         }
       }
-      if (loginLink && data.group && data.group.name) {
-        loginLink.href = '/member-login';
-      }
+
+      if (loginLink) loginLink.href = '/member-login';
+
       if (anotherBtn) {
         anotherBtn.addEventListener('click', () => {
           Alert.info(
@@ -875,7 +724,7 @@
   }
 
   /* ============================================================
-   * 12. MEMBER PAGE (member.html)
+   * 11. MEMBER PAGE (member.html)
    * ============================================================ */
   async function initMemberPage() {
     const loginView = document.getElementById('view-login');
@@ -893,7 +742,6 @@
       dashView.hidden = true;
       if (logoutBtn) logoutBtn.hidden = true;
     };
-
     const showDashboard = () => {
       loginView.hidden = true;
       dashView.hidden = false;
@@ -969,10 +817,7 @@
     async function loadMemberGroup() {
       const { ok, data } = await api('/api/member/group');
       if (!ok || !data || !data.success) {
-        if (data && data.code === 'AUTH_REQUIRED') {
-          showLogin();
-          return;
-        }
+        if (data && data.code === 'AUTH_REQUIRED') { showLogin(); return; }
         Alert.error((data && data.message) || 'Could not load your group.');
         return;
       }
@@ -1005,10 +850,7 @@
       const fill = document.getElementById('dash-capacity-fill');
       const text = document.getElementById('dash-capacity-text');
       const pct = capacity > 0 ? Math.min(100, Math.round((memberCount / capacity) * 100)) : 0;
-      if (fill) {
-        fill.style.width = pct + '%';
-        fill.classList.toggle('is-full', pct >= 100);
-      }
+      if (fill) { fill.style.width = pct + '%'; fill.classList.toggle('is-full', pct >= 100); }
       if (text) text.textContent = `${memberCount} / ${capacity} members`;
 
       const tbody = document.getElementById('member-table-body');
@@ -1040,7 +882,7 @@
   }
 
   /* ============================================================
-   * 13. ADMIN PAGE (admin.html)
+   * 12. ADMIN PAGE (admin.html)
    * ============================================================ */
   async function initAdminPage() {
     const loginView = document.getElementById('view-login');
@@ -1053,13 +895,14 @@
     const logoutBtn = document.getElementById('admin-logout-btn');
     const liveIndicator = document.getElementById('live-indicator');
 
-    /* ---- STATE ---- */
+    /* ---------- STATE ---------- */
     let sse = null;
     let sseReconnectDelay = 1000;
     let currentGroupId = null;
     let currentGroupData = null;
+    let currentSettings = null;
 
-    /* ---- Registration + payment status pills ---- */
+    /* ---------- Status pills ---------- */
     function renderRegistrationStatus(open) {
       const pill = document.getElementById('submissions-status-pill');
       const help = document.getElementById('submissions-status-help');
@@ -1077,9 +920,7 @@
       }
       if (toggleBtn) {
         const label = toggleBtn.querySelector('.btn-label');
-        if (label) {
-          label.textContent = open ? 'Close Submissions' : 'Open Submissions';
-        }
+        if (label) label.textContent = open ? 'Close Submissions' : 'Open Submissions';
         toggleBtn.classList.toggle('btn-danger-outline', open);
         toggleBtn.classList.toggle('btn-primary', !open);
       }
@@ -1093,7 +934,6 @@
         pill.textContent = requirePaymentProof ? 'ON' : 'OFF';
         pill.classList.toggle('badge-full', requirePaymentProof);
         pill.classList.toggle('badge-member', !requirePaymentProof);
-        pill.classList.toggle('badge-open', false);
       }
       if (help) {
         help.textContent = requirePaymentProof
@@ -1102,13 +942,11 @@
       }
     }
 
-    /* ---- Settings form ---- */
+    /* ---------- Settings form ---------- */
     const settingsForm = document.getElementById('settings-form');
     const settingsSaveBtn = document.getElementById('settings-save-btn');
     const settingsResetBtn = document.getElementById('settings-reset-btn');
     const settingsSavedAt = document.getElementById('settings-saved-at');
-
-    let currentSettings = null;
 
     function fillSettingsForm(s) {
       if (!s) return;
@@ -1141,9 +979,7 @@
 
     async function loadSettings() {
       const { ok, data } = await api('/api/admin/settings');
-      if (ok && data && data.success) {
-        fillSettingsForm(data);
-      }
+      if (ok && data && data.success) fillSettingsForm(data);
     }
 
     if (settingsForm) {
@@ -1181,10 +1017,7 @@
           return;
         }
 
-        const { ok, data } = await api('/api/admin/settings', {
-          method: 'POST',
-          body: payload,
-        });
+        const { ok, data } = await api('/api/admin/settings', { method: 'POST', body: payload });
 
         if (ok && data && data.success) {
           Alert.success(data.message || 'Settings saved.', { timeout: 2500 });
@@ -1199,7 +1032,6 @@
           if (settingsSavedAt) {
             settingsSavedAt.textContent = 'Last saved at ' + new Date().toLocaleTimeString();
           }
-          // Refresh the dashboard so tiles reflect the new cap
           loadDashboard();
         } else {
           Alert.error((data && data.message) || 'Could not save settings.');
@@ -1218,7 +1050,260 @@
       });
     }
 
-    /* ---- SSE ---- */
+    /* ---------- Paste-and-verify ---------- */
+    const pasteForm = document.getElementById('paste-verify-form');
+    const pasteBtn = document.getElementById('paste-verify-btn');
+    const pasteText = document.getElementById('paste-verify-text');
+    const pasteClearBtn = document.getElementById('paste-verify-clear-btn');
+    const pasteResults = document.getElementById('paste-verify-results');
+
+    function clearPasteResults() {
+      if (pasteResults) {
+        pasteResults.hidden = true;
+        pasteResults.innerHTML = '';
+      }
+    }
+
+    if (pasteClearBtn) {
+      pasteClearBtn.addEventListener('click', () => {
+        if (pasteText) pasteText.value = '';
+        clearPasteResults();
+      });
+    }
+
+    if (pasteForm) {
+      pasteForm.addEventListener('submit', withLoading(pasteBtn, async (e) => {
+        e.preventDefault();
+        clearFieldErrors(pasteForm);
+        clearPasteResults();
+
+        const text = pasteText ? pasteText.value.trim() : '';
+        if (!text) {
+          setFieldError('paste-verify-text', 'Paste at least one M-Pesa message.');
+          return;
+        }
+
+        const { ok, data } = await api('/api/admin/verify-payments', {
+          method: 'POST',
+          body: { text },
+        });
+
+        if (ok && data && data.success) {
+          // Clear the textarea (ready for the next paste)
+          if (pasteText) pasteText.value = '';
+          renderVerifyResults(data);
+          Alert.success(
+            `Extraction complete — ${data.verifiedCount} newly verified.`,
+            { timeout: 3500 }
+          );
+          // Refresh pending list, dashboard tiles, and group view
+          loadPendingPayments();
+          loadDashboard();
+          if (currentGroupId) openGroup(currentGroupId);
+        } else {
+          Alert.error((data && data.message) || 'Could not verify payments.');
+        }
+      }));
+    }
+
+    function renderVerifyResults(payload) {
+      if (!pasteResults) return;
+      const results = payload.results || {};
+      const verified = results.verified || [];
+      const already = results.alreadyVerified || [];
+      const unmatched = results.unmatched || [];
+      const ambiguous = results.ambiguous || [];
+
+      pasteResults.innerHTML = '';
+
+      // Summary tiles
+      const grid = el('div', { class: 'verify-results-grid' }, [
+        el('div', { class: 'verify-stat' }, [
+          el('span', { class: 'verify-stat-label', text: 'Codes found' }),
+          el('span', { class: 'verify-stat-value', text: String(payload.total || 0) }),
+        ]),
+        el('div', { class: 'verify-stat' }, [
+          el('span', { class: 'verify-stat-label', text: 'Newly verified' }),
+          el('span', { class: 'verify-stat-value is-good', text: String(payload.verifiedCount || 0) }),
+        ]),
+        el('div', { class: 'verify-stat' }, [
+          el('span', { class: 'verify-stat-label', text: 'Already verified' }),
+          el('span', { class: 'verify-stat-value', text: String(payload.alreadyVerifiedCount || 0) }),
+        ]),
+        el('div', { class: 'verify-stat' }, [
+          el('span', { class: 'verify-stat-label', text: 'Unmatched' }),
+          el('span', { class: 'verify-stat-value is-warn', text: String(payload.unmatchedCount || 0) }),
+        ]),
+      ]);
+      pasteResults.appendChild(grid);
+
+      // Verified list
+      if (verified.length) {
+        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Newly Verified (${verified.length})` }));
+        const list = el('ul', { class: 'verify-list' });
+        verified.forEach((v) => {
+          list.appendChild(el('li', { class: 'is-verified' }, [
+            el('span', { class: 'verify-code', text: v.code }),
+            ' — ' + (v.name || '') + ' (' + (v.regNo || '') + ')',
+          ]));
+        });
+        pasteResults.appendChild(list);
+      }
+
+      // Already-verified list
+      if (already.length) {
+        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Already Verified (${already.length})` }));
+        const list = el('ul', { class: 'verify-list' });
+        already.forEach((v) => {
+          list.appendChild(el('li', { class: 'is-already' }, [
+            el('span', { class: 'verify-code', text: v.code }),
+            ' — ' + (v.name || '') + ' (' + (v.regNo || '') + ')',
+          ]));
+        });
+        pasteResults.appendChild(list);
+      }
+
+      // Unmatched list
+      if (unmatched.length) {
+        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Unmatched (${unmatched.length})` }));
+        const list = el('ul', { class: 'verify-list' });
+        unmatched.forEach((u) => {
+          const parts = [el('span', { class: 'verify-code', text: u.code })];
+          if (u.senderPhone) parts.push(' — phone ' + u.senderPhone);
+          if (u.amount != null) parts.push(' — KSH ' + u.amount);
+          list.appendChild(el('li', { class: 'is-unmatched' }, parts));
+        });
+        pasteResults.appendChild(list);
+      }
+
+      // Ambiguous list
+      if (ambiguous.length) {
+        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Ambiguous (${ambiguous.length})` }));
+        const list = el('ul', { class: 'verify-list' });
+        ambiguous.forEach((a) => {
+          list.appendChild(el('li', { class: 'is-ambiguous' }, [
+            el('span', { class: 'verify-code', text: a.code }),
+            ` — phone ${a.senderPhone} matches ${a.count} members. Please verify manually.`,
+          ]));
+        });
+        pasteResults.appendChild(list);
+      }
+
+      pasteResults.hidden = false;
+      try { pasteResults.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
+    }
+
+    /* ---------- Pending payments ---------- */
+    const pendingBody = document.getElementById('pending-table-body');
+    const refreshPendingBtn = document.getElementById('btn-refresh-pending');
+
+    async function loadPendingPayments() {
+      if (!pendingBody) return;
+      const { ok, data } = await api('/api/admin/pending-payments');
+      if (!ok || !data || !data.success) {
+        if (data && data.code === 'AUTH_REQUIRED') return;
+        pendingBody.innerHTML = '<tr><td colspan="10" class="table-empty">Could not load pending payments.</td></tr>';
+        return;
+      }
+
+      const list = data.pending || [];
+      pendingBody.innerHTML = '';
+
+      if (list.length === 0) {
+        pendingBody.appendChild(el('tr', {}, [
+          el('td', { colspan: '10', class: 'table-empty', text: 'No pending or rejected payments.' }),
+        ]));
+        return;
+      }
+
+      list.forEach((p) => {
+        const tr = el('tr');
+
+        tr.appendChild(el('td', { text: p.paymentSubmittedAt ? formatDate(p.paymentSubmittedAt) : formatDate(p.createdAt) }));
+        tr.appendChild(el('td', { text: p.groupName || '—' }));
+        tr.appendChild(el('td', { class: 'mono', text: p.regNo }));
+        tr.appendChild(el('td', { text: p.name }));
+        tr.appendChild(el('td', { text: p.phone }));
+        tr.appendChild(el('td', { class: 'mono', text: p.mpesaCode || '—' }));
+        tr.appendChild(el('td', { text: p.paymentAmount != null ? String(p.paymentAmount) : '—' }));
+        tr.appendChild(el('td', { text: p.paymentNote ? truncate(p.paymentNote, 60) : '—' }));
+
+        const statusTd = el('td');
+        if (p.paymentStatus === 'rejected') {
+          statusTd.appendChild(el('span', { class: 'badge badge-rejected', text: 'REJECTED' }));
+        } else {
+          statusTd.appendChild(el('span', { class: 'badge badge-pending', text: 'PENDING' }));
+        }
+        tr.appendChild(statusTd);
+
+        const actionsTd = el('td');
+        const actions = el('div', { class: 'pending-actions' });
+
+        const verifyBtn = el('button', {
+          type: 'button',
+          class: 'btn btn-primary btn-small',
+          onClick: async () => {
+            const confirmed = await Modal.confirm(
+              `Mark ${p.name} (${p.regNo}) as verified? Do this only after confirming on your M-Pesa statement.`,
+              { title: 'Verify Payment', okText: 'Verify', cancelText: 'Cancel' }
+            );
+            if (!confirmed) return;
+            const { ok: vOk, data: vData } = await api(
+              `/api/admin/members/${encodeURIComponent(p.id)}/verify-payment`,
+              { method: 'POST', body: {} }
+            );
+            if (vOk && vData && vData.success) {
+              Alert.success(`${p.name} marked as verified.`, { timeout: 2500 });
+              loadPendingPayments();
+              loadDashboard();
+              if (currentGroupId) openGroup(currentGroupId);
+            } else {
+              Alert.error((vData && vData.message) || 'Could not verify payment.');
+            }
+          },
+        }, ['Verify']);
+        actions.appendChild(verifyBtn);
+
+        const rejectBtn = el('button', {
+          type: 'button',
+          class: 'btn btn-danger-outline btn-small',
+          onClick: async () => {
+            const reason = window.prompt(
+              `Reason for rejecting ${p.name}'s payment? (optional)`,
+              'Code could not be verified on M-Pesa statement.'
+            );
+            if (reason === null) return;
+            const { ok: rOk, data: rData } = await api(
+              `/api/admin/members/${encodeURIComponent(p.id)}/reject-payment`,
+              { method: 'POST', body: { reason: reason || '' } }
+            );
+            if (rOk && rData && rData.success) {
+              Alert.warning(`${p.name} marked as REJECTED.`, { timeout: 3000 });
+              loadPendingPayments();
+              loadDashboard();
+              if (currentGroupId) openGroup(currentGroupId);
+            } else {
+              Alert.error((rData && rData.message) || 'Could not reject payment.');
+            }
+          },
+        }, ['Reject']);
+        actions.appendChild(rejectBtn);
+
+        actionsTd.appendChild(actions);
+        tr.appendChild(actionsTd);
+
+        pendingBody.appendChild(tr);
+      });
+    }
+
+    if (refreshPendingBtn) {
+      refreshPendingBtn.addEventListener('click', withLoading(refreshPendingBtn, async () => {
+        await loadPendingPayments();
+        Alert.success('Pending list refreshed.', { timeout: 1500 });
+      }));
+    }
+
+    /* ---------- SSE ---------- */
     function startSse() {
       if (sse) return;
       try {
@@ -1256,14 +1341,13 @@
             );
           } catch (_) { /* ignore */ }
           refreshAll();
+          loadPendingPayments();
         });
 
         sse.addEventListener('registration-status', (ev) => {
           try {
             const payload = JSON.parse(ev.data);
-            if (payload && typeof payload.open === 'boolean') {
-              renderRegistrationStatus(payload.open);
-            }
+            if (payload && typeof payload.open === 'boolean') renderRegistrationStatus(payload.open);
           } catch (_) { /* ignore */ }
         });
 
@@ -1273,7 +1357,10 @@
 
         ['member-added', 'member-updated', 'member-deleted', 'group-created', 'group-updated', 'group-deleted']
           .forEach((evName) => {
-            sse.addEventListener(evName, () => refreshAll());
+            sse.addEventListener(evName, () => {
+              refreshAll();
+              loadPendingPayments();
+            });
           });
       } catch (err) {
         console.warn('SSE init failed:', err);
@@ -1290,7 +1377,7 @@
 
     window.addEventListener('beforeunload', stopSse);
 
-    /* ---- View switching ---- */
+    /* ---------- View switching ---------- */
     function showLogin() {
       loginView.hidden = false;
       dashView.hidden = true;
@@ -1312,17 +1399,17 @@
       if (logoutBtn) logoutBtn.hidden = false;
     }
 
-    /* ---- Session check ---- */
+    /* ---------- Session check ---------- */
     const me = await api('/api/admin/me');
     if (me.ok && me.data && me.data.success) {
-      await Promise.all([loadDashboard(), loadSettings()]);
+      await Promise.all([loadDashboard(), loadSettings(), loadPendingPayments()]);
       startSse();
       showDashboard();
     } else {
       showLogin();
     }
 
-    /* ---- Login ---- */
+    /* ---------- Login ---------- */
     if (loginForm) {
       loginForm.addEventListener('submit', withLoading(loginBtn, async (e) => {
         e.preventDefault();
@@ -1345,7 +1432,7 @@
         if (ok && data && data.success) {
           Alert.success('Welcome, administrator.', { timeout: 2500 });
           loginForm.reset();
-          await Promise.all([loadDashboard(), loadSettings()]);
+          await Promise.all([loadDashboard(), loadSettings(), loadPendingPayments()]);
           startSse();
           showDashboard();
         } else {
@@ -1357,7 +1444,7 @@
       }));
     }
 
-    /* ---- Logout ---- */
+    /* ---------- Logout ---------- */
     if (logoutBtn) {
       logoutBtn.addEventListener('click', async () => {
         const confirmed = await Modal.confirm('Log out of the administrator portal?', {
@@ -1375,7 +1462,7 @@
       });
     }
 
-    /* ---- Registration toggle button ---- */
+    /* ---------- Registration toggle ---------- */
     const toggleRegBtn = document.getElementById('btn-toggle-registration');
     if (toggleRegBtn) {
       toggleRegBtn.addEventListener('click', withLoading(toggleRegBtn, async () => {
@@ -1410,7 +1497,7 @@
       }));
     }
 
-    /* ---- Dashboard ---- */
+    /* ---------- Dashboard ---------- */
     async function loadDashboard() {
       const { ok, data } = await api('/api/admin/dashboard');
       if (!ok || !data || !data.success) {
@@ -1432,6 +1519,11 @@
       setText('stat-total-members', totals.totalMembers != null ? totals.totalMembers : 0);
       setText('stat-total-groups', totals.totalGroups != null ? totals.totalGroups : 0);
       setText('stat-total-leaders', totals.totalLeaders != null ? totals.totalLeaders : 0);
+
+      setText('stat-paid', totals.paid != null ? totals.paid : 0);
+      setText('stat-pending', totals.pending != null ? totals.pending : 0);
+      setText('stat-rejected', totals.rejected != null ? totals.rejected : 0);
+      setText('stat-unpaid', totals.unpaid != null ? totals.unpaid : 0);
 
       const totalSlots = groups.length * maxGroupMembers;
       const usedSlots = groups.reduce((acc, g) => acc + (g.memberCount || 0), 0);
@@ -1510,25 +1602,29 @@
     }
 
     function clearDashboard() {
-      ['stat-total-members', 'stat-total-groups', 'stat-total-leaders', 'stat-capacity-pct']
+      ['stat-total-members', 'stat-total-groups', 'stat-total-leaders', 'stat-capacity-pct',
+       'stat-paid', 'stat-pending', 'stat-rejected', 'stat-unpaid']
         .forEach((id) => setText(id, '0'));
       setText('stat-capacity-sub', '0 / 0 slots');
       const rb = document.getElementById('recent-table-body');
       if (rb) rb.innerHTML = '<tr><td colspan="7" class="table-empty">Loading…</td></tr>';
       const grid = document.getElementById('groups-list');
       if (grid) grid.innerHTML = '<p class="muted">Loading groups…</p>';
+      const pb = document.getElementById('pending-table-body');
+      if (pb) pb.innerHTML = '<tr><td colspan="10" class="table-empty">Loading…</td></tr>';
+      clearPasteResults();
     }
 
-    /* ---- Refresh ---- */
+    /* ---------- Refresh button ---------- */
     const refreshBtn = document.getElementById('btn-refresh-dashboard');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', withLoading(refreshBtn, async () => {
-        await Promise.all([loadDashboard(), loadSettings()]);
+        await Promise.all([loadDashboard(), loadSettings(), loadPendingPayments()]);
         Alert.success('Refreshed.', { timeout: 1500 });
       }));
     }
 
-    /* ---- Create group ---- */
+    /* ---------- Create group ---------- */
     const createGroupBtn = document.getElementById('btn-create-group');
     if (createGroupBtn) {
       createGroupBtn.addEventListener('click', () => openGroupModal(null));
@@ -1569,12 +1665,8 @@
         }
 
         const { ok, data } = id
-          ? await api(`/api/admin/groups/${encodeURIComponent(id)}`, {
-              method: 'PATCH', body: { name },
-            })
-          : await api('/api/admin/groups', {
-              method: 'POST', body: { name },
-            });
+          ? await api(`/api/admin/groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: { name } })
+          : await api('/api/admin/groups', { method: 'POST', body: { name } });
 
         if (ok && data && data.success) {
           Modal.close('modal-group');
@@ -1591,7 +1683,7 @@
       }));
     }
 
-    /* ---- Group detail ---- */
+    /* ---------- Group detail ---------- */
     async function openGroup(groupId) {
       currentGroupId = groupId;
       const { ok, data } = await api(`/api/admin/groups/${encodeURIComponent(groupId)}`);
@@ -1617,6 +1709,7 @@
       setText('group-leader-name', group.leaderName || '—');
       setText('group-leader-regno', group.leaderRegNo ? `REG: ${group.leaderRegNo}` : '');
       setText('group-created', formatDateShort(group.createdAt));
+
       const statusEl = document.getElementById('group-status');
       if (statusEl) {
         const isFull = (group.memberCount || members.length) >= (group.capacity || 10);
@@ -1814,11 +1907,14 @@
           Alert.success(data.message || 'Saved.', { timeout: 2200 });
           if (currentGroupId) await openGroup(currentGroupId);
           await loadDashboard();
+          loadPendingPayments();
         } else {
           const code = (data && data.code) || '';
           const msg = (data && data.message) || 'Could not save member.';
           if (code === 'DUPLICATE_REGNO') setFieldError('member-regNo', 'Already registered.');
           else if (code === 'INVALID_PHONE') setFieldError('member-phone', 'Invalid phone number.');
+          else if (code === 'INVALID_MPESA_CODE') setFieldError('member-mpesa', msg);
+          else if (code === 'DUPLICATE_MPESA_CODE') setFieldError('member-mpesa', msg);
           Alert.error(msg);
         }
       }));
@@ -1839,52 +1935,46 @@
         Alert.success('Member deleted.', { timeout: 2000 });
         if (currentGroupId) await openGroup(currentGroupId);
         await loadDashboard();
+        loadPendingPayments();
       } else {
         Alert.error((data && data.message) || 'Could not delete member.');
       }
     }
 
-    /* ---- Export links: blur on click so the button doesn't stay focused ---- */
+    /* ---------- Export links: blur on click ---------- */
     ['btn-export-csv', 'btn-export-pdf', 'btn-export-paid-pdf'].forEach((id) => {
       const link = document.getElementById(id);
       if (link) link.addEventListener('click', (e) => e.currentTarget.blur());
     });
 
-    /* ---- Deep link: /admin-group?id=xxx ---- */
+    /* ---------- Deep link: /admin-group?id=xxx ---------- */
     const params = new URLSearchParams(window.location.search);
     const qsId = params.get('id');
     if (qsId && me.ok && me.data && me.data.success) {
       openGroup(qsId);
     }
 
-    window.__peg_admin = { loadDashboard, openGroup };
+    window.__peg_admin = { loadDashboard, openGroup, loadPendingPayments };
   }
 
   /* ============================================================
-   * 14. Auto-bootstrap by page
+   * 13. Auto-bootstrap by page
    * ============================================================ */
   function bootstrap() {
     wireVisibilityToggles();
-
     getCsrfToken().catch(() => {});
 
     const yearEl = document.getElementById('footer-year');
     if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
-    if (document.getElementById('register-form')) {
-      initRegisterPage();
-    }
+    if (document.getElementById('register-form')) initRegisterPage();
 
     if (document.getElementById('member-login-form')) {
-      initMemberPage().catch((err) => {
-        console.error('[PEG] initMemberPage failed:', err);
-      });
+      initMemberPage().catch((err) => console.error('[PEG] initMemberPage failed:', err));
     }
 
     if (document.getElementById('admin-login-form')) {
-      initAdminPage().catch((err) => {
-        console.error('[PEG] initAdminPage failed:', err);
-      });
+      initAdminPage().catch((err) => console.error('[PEG] initAdminPage failed:', err));
     }
   }
 
@@ -1895,7 +1985,7 @@
   }
 
   /* ============================================================
-   * 15. Public API
+   * 14. Public API
    * ============================================================ */
   window.PEG = window.PEG || {};
   window.PEG.initMemberPage = initMemberPage;
