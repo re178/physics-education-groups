@@ -13,7 +13,64 @@
   /* Safety net: any element with the [hidden] attribute is truly hidden */
   [hidden] { display: none !important; }
 
-  /* Paste-verify card */
+  /* ---------------------------------------------------------------
+     Submission + payment status banner
+     --------------------------------------------------------------- */
+  .submission-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 32px;
+    align-items: center;
+  }
+  .submission-status-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    align-items: center;
+  }
+  .submission-status-label {
+    font-weight: 600;
+    color: #1f2937;
+    font-size: 0.9rem;
+  }
+
+  /* ---------------------------------------------------------------
+     Settings form grid
+     --------------------------------------------------------------- */
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  @media (min-width: 640px) {
+    .form-grid { grid-template-columns: 1fr 1fr; }
+  }
+  .span-full { grid-column: 1 / -1; }
+  .field-checkbox {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    min-height: 0;
+    margin: 0;
+    accent-color: #0b3d91;
+    cursor: pointer;
+  }
+
+  /* ---------------------------------------------------------------
+     Paste-and-verify card
+     --------------------------------------------------------------- */
   .paste-verify-textarea {
     width: 100%;
     min-height: 200px;
@@ -28,7 +85,6 @@
     resize: vertical;
     -webkit-appearance: none;
     appearance: none;
-    min-height: 44px;
   }
   .paste-verify-textarea:focus {
     outline: none;
@@ -48,6 +104,10 @@
     font-size: 0.85rem;
     color: #6b7280;
   }
+
+  /* ---------------------------------------------------------------
+     Verification results panel
+     --------------------------------------------------------------- */
   .verify-results {
     margin-top: 20px;
     padding: 16px 18px;
@@ -83,7 +143,7 @@
   }
   .verify-stat-value.is-good { color: #15803d; }
   .verify-stat-value.is-warn { color: #b45309; }
-  .verify-stat-value.is-bad { color: #b91c1c; }
+  .verify-stat-value.is-bad  { color: #b91c1c; }
 
   .verify-list {
     margin: 0 0 12px;
@@ -102,6 +162,7 @@
   .verify-list li.is-already  { border-left: 3px solid #0b3d91; background: #e7eefb; }
   .verify-list li.is-unmatched{ border-left: 3px solid #b45309; background: #fef9c3; }
   .verify-list li.is-ambiguous{ border-left: 3px solid #b91c1c; background: #fdeaea; }
+
   .verify-code {
     display: inline-block;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -121,19 +182,40 @@
     letter-spacing: 0.04em;
   }
 
-  /* Pending payments card */
+  /* ---------------------------------------------------------------
+     Pending payments table
+     --------------------------------------------------------------- */
   .pending-actions {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
   }
 
-  /* Payment stat tile */
-  .payment-tile-row {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+  /* ---------------------------------------------------------------
+     Payment cell renderer (used in recent + group tables)
+     --------------------------------------------------------------- */
+  .payment-cell { min-width: 100px; }
+  .payment-cell .badge { font-size: 0.68rem; }
+  .payment-cell .payment-mpesa-code {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.7rem;
+    color: #6b7280;
+    margin-top: 2px;
+    word-break: break-all;
   }
+  .payment-cell .payment-note-line {
+    display: block;
+    font-size: 0.72rem;
+    color: #6b7280;
+    margin-top: 2px;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  /* Additional utility badge colors used by the payment pill */
+  .badge-pending  { background: #fef9c3; color: #b45309; border: 1px solid #fde68a; }
+  .badge-rejected { background: #fdeaea; color: #b91c1c; border: 1px solid #f3b9b9; }
 </style>
 </head>
 <body class="page page-admin">
@@ -244,7 +326,7 @@
       </p>
     </div>
 
-    <!-- Stat tiles -->
+    <!-- ---------- Stat tiles ---------- -->
     <section class="stat-grid" aria-label="Dashboard totals">
       <div class="stat">
         <span class="stat-label">Total Members</span>
@@ -265,7 +347,7 @@
       </div>
     </section>
 
-    <!-- Payment tiles -->
+    <!-- ---------- Payment tiles ---------- -->
     <section class="stat-grid" aria-label="Payment totals">
       <div class="stat">
         <span class="stat-label">Paid (Verified)</span>
@@ -352,7 +434,7 @@
         </div>
       </form>
 
-      <!-- Results panel -->
+      <!-- Results panel — populated by app.js -->
       <div id="paste-verify-results" class="verify-results" hidden></div>
     </section>
 
@@ -532,7 +614,7 @@
       </div>
     </section>
 
-    <!-- Recent registrations -->
+    <!-- ---------- Recent registrations ---------- -->
     <section class="card" aria-labelledby="recent-title">
       <div class="card-head">
         <h2 id="recent-title">Recent Registrations</h2>
@@ -558,7 +640,7 @@
       </div>
     </section>
 
-    <!-- Groups list -->
+    <!-- ---------- Groups grid ---------- -->
     <section class="card" aria-labelledby="groups-title">
       <div class="card-head">
         <h2 id="groups-title">All Groups</h2>
