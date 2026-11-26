@@ -1,14 +1,13 @@
 /* ============================================================
- * PHYSICS EDUCATION GROUPS — public/app.js
+ * ITB9301 - INTERNET COMPUTING — public/app.js
  * ------------------------------------------------------------
- * Version: 1.5.0
+ * Version: 2.0.0
  *
  * Handles the register page, member portal, and admin portal.
  * Auto-detects which page it's on by the presence of unique
  * form IDs and runs the matching initializer.
  *
- * No inline scripts required (CSP-safe). All styles are inline
- * in each HTML file — this file only injects behaviour.
+ * No inline scripts required (CSP-safe).
  * ============================================================ */
 'use strict';
 
@@ -17,8 +16,8 @@
   /* ============================================================
    * 0. Constants
    * ============================================================ */
-  const DEVICE_KEY = 'peg_device_id_v1';
-  const CSRF_COOKIE = 'peg_csrf';
+  const DEVICE_KEY = 'itb9301_device_id_v1';
+  const CSRF_COOKIE = 'itb9301_csrf';
   const CSRF_HEADER = 'X-CSRF-Token';
 
   /* ============================================================
@@ -110,8 +109,8 @@
         }
         return id;
       } catch (_) {
-        if (!window.__peg_mem_device_id) window.__peg_mem_device_id = uuid();
-        return window.__peg_mem_device_id;
+        if (!window.__itb9301_mem_device_id) window.__itb9301_mem_device_id = uuid();
+        return window.__itb9301_mem_device_id;
       }
     }
 
@@ -436,35 +435,42 @@
   }
 
   /* ============================================================
-   * 9. Payment cell renderer (used by admin tables)
+   * 9. Shared: populate a group <select> from /api/config data
+   * ------------------------------------------------------------
+   *  - always starts with a placeholder option (selected, disabled)
+   *  - full groups: disabled on the register page, enabled on login
    * ============================================================ */
-  function buildPaymentCell(member) {
-    const td = el('td', { class: 'payment-cell' });
-    const status = member && member.paymentStatus ? member.paymentStatus : null;
-    const code = member && member.mpesaCode ? String(member.mpesaCode) : '';
+  function populateGroupSelect(selectEl, groups, opts = {}) {
+    if (!selectEl) return;
+    const { disableFull = true, placeholderText = 'Choose a group', showCounts = true } = opts;
+    selectEl.innerHTML = '';
 
-    if (status === 'verified') {
-      td.appendChild(el('span', { class: 'badge badge-open', text: 'PAID' }));
-      if (code) td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
-      if (member.paymentNote) {
-        td.appendChild(el('span', { class: 'payment-note-line', text: member.paymentNote }));
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = (groups && groups.length)
+      ? `— ${placeholderText} —`
+      : 'No groups available';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    selectEl.appendChild(placeholder);
+
+    for (const g of groups || []) {
+      const opt = document.createElement('option');
+      opt.value = String(g.index);
+      let label = g.name;
+      if (showCounts) {
+        label = `${g.name} (${g.memberCount}/${g.capacity})`;
       }
-    } else if (status === 'pending') {
-      td.appendChild(el('span', { class: 'badge badge-pending', text: 'PENDING' }));
-      if (code) td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
-      if (member.paymentNote) {
-        td.appendChild(el('span', { class: 'payment-note-line', text: member.paymentNote }));
+      if (disableFull && g.isFull) {
+        opt.textContent = `${label} — FULL`;
+        opt.disabled = true;
+      } else {
+        opt.textContent = label;
       }
-    } else if (status === 'rejected') {
-      td.appendChild(el('span', { class: 'badge badge-rejected', text: 'REJECTED' }));
-      if (code) td.appendChild(el('span', { class: 'payment-mpesa-code', text: code }));
-      if (member.paymentRejectedReason) {
-        td.appendChild(el('span', { class: 'payment-note-line', text: member.paymentRejectedReason }));
-      }
-    } else {
-      td.appendChild(el('span', { class: 'badge badge-member', text: 'UNPAID' }));
+      selectEl.appendChild(opt);
     }
-    return td;
+
+    selectEl.disabled = !groups || groups.length === 0;
   }
 
   /* ============================================================
@@ -481,39 +487,32 @@
 
     const submitBtn = document.getElementById('submit-btn');
     const successCard = document.getElementById('success-card');
-
-    // Payment UI nodes
-    const paymentCard = document.getElementById('payment-card');
-    const paymentAmountSpan = document.getElementById('payment-amount');
-    const paymentPhoneSpan = document.getElementById('payment-phone');
-    const fieldMpesa = document.getElementById('field-mpesa');
-    const fieldPaymentNote = document.getElementById('field-payment-note');
+    const groupSelect = document.getElementById('groupName');
     const heroCapacity = document.getElementById('hero-capacity');
 
-    // Runtime state derived from /api/payment-config
     const state = {
       registrationOpen: true,
-      requirePaymentProof: false,
-      paymentAmount: 45,
-      paymentPhone: '0741742291',
-      maxGroupMembers: 10,
+      maxGroupMembers: 50,
+      totalGroups: 50,
+      groups: [],
+      configLoaded: false,
     };
 
     function applyConfig(cfg) {
       if (!cfg || typeof cfg !== 'object') return;
 
-      if (typeof cfg.registrationOpen === 'boolean') state.registrationOpen = cfg.registrationOpen;
-      if (typeof cfg.requirePaymentProof === 'boolean') state.requirePaymentProof = cfg.requirePaymentProof;
-      if (cfg.paymentAmount != null) state.paymentAmount = Number(cfg.paymentAmount) || state.paymentAmount;
-      if (cfg.paymentPhone) state.paymentPhone = String(cfg.paymentPhone);
-      if (cfg.maxGroupMembers != null) state.maxGroupMembers = Number(cfg.maxGroupMembers) || state.maxGroupMembers;
+      state.registrationOpen = cfg.registrationOpen !== false;
+      state.maxGroupMembers = Number(cfg.maxGroupMembers) || 50;
+      state.totalGroups = Number(cfg.totalGroups) || 50;
+      state.groups = Array.isArray(cfg.groups) ? cfg.groups : [];
+      state.configLoaded = true;
 
       if (heroCapacity) heroCapacity.textContent = `${state.maxGroupMembers} members`;
-      if (paymentCard) paymentCard.hidden = !state.requirePaymentProof;
-      if (fieldMpesa) fieldMpesa.hidden = !state.requirePaymentProof;
-      if (fieldPaymentNote) fieldPaymentNote.hidden = !state.requirePaymentProof;
-      if (paymentAmountSpan) paymentAmountSpan.textContent = String(state.paymentAmount);
-      if (paymentPhoneSpan) paymentPhoneSpan.textContent = state.paymentPhone;
+      populateGroupSelect(groupSelect, state.groups, {
+        disableFull: true,
+        placeholderText: 'Choose a group',
+        showCounts: true,
+      });
 
       // Registration closed notice
       const existingNotice = document.getElementById('registration-closed-notice');
@@ -545,7 +544,7 @@
     // Fetch config on load.
     (async () => {
       try {
-        const { ok, data } = await api('/api/payment-config');
+        const { ok, data } = await api('/api/config');
         if (ok && data && data.success) {
           applyConfig(data);
         } else {
@@ -578,9 +577,8 @@
       const regNo = ($('#regNo') || {}).value || '';
       const name = ($('#name') || {}).value || '';
       const phone = ($('#phone') || {}).value || '';
-      const groupName = ($('#groupName') || {}).value || '';
-      const mpesaCode = state.requirePaymentProof ? (($('#mpesaCode') || {}).value || '') : '';
-      const paymentNote = state.requirePaymentProof ? (($('#paymentNote') || {}).value || '') : '';
+      const groupIndexRaw = groupSelect ? groupSelect.value : '';
+      const groupIndex = Number(groupIndexRaw);
 
       let hasError = false;
       if (!regNo.trim()) { setFieldError('regNo', 'Registration number is required.'); hasError = true; }
@@ -590,27 +588,13 @@
       else if (name.trim().length < 2) { setFieldError('name', 'Full name is too short.'); hasError = true; }
 
       if (!phone.trim()) { setFieldError('phone', 'Phone number is required.'); hasError = true; }
-      if (!groupName.trim()) { setFieldError('groupName', 'Group name is required.'); hasError = true; }
 
-      if (state.requirePaymentProof) {
-        const code = mpesaCode.trim().toUpperCase();
-        if (!code) {
-          setFieldError('mpesaCode', 'M-Pesa confirmation code is required.');
-          hasError = true;
-        } else if (!/^[A-Z0-9]{10}$/.test(code)) {
-          setFieldError('mpesaCode', 'Enter the 10-character code from the M-Pesa SMS.');
-          hasError = true;
-        } else if (!/[A-Z]/.test(code) || !/[0-9]/.test(code)) {
-          setFieldError('mpesaCode', 'M-Pesa code must contain both letters and digits.');
-          hasError = true;
-        } else if (/^(.)\1+$/.test(code) || /^(.)\1{4}/.test(code)) {
-          setFieldError('mpesaCode', 'This looks like a fake code. Enter the code from your M-Pesa SMS.');
-          hasError = true;
-        }
-        if (!paymentNote.trim()) {
-          setFieldError('paymentNote', 'Please note the time and day you paid.');
-          hasError = true;
-        }
+      if (!groupIndexRaw) {
+        setFieldError('groupName', 'Please choose a group.');
+        hasError = true;
+      } else if (!Number.isInteger(groupIndex) || groupIndex < 1) {
+        setFieldError('groupName', 'Please choose a valid group.');
+        hasError = true;
       }
 
       if (hasError) {
@@ -622,14 +606,10 @@
         regNo: regNo.trim(),
         name: name.trim(),
         phone: phone.trim(),
-        groupName: groupName.trim(),
+        groupIndex,
         deviceId: Device.getId(),
         deviceMetadata: Device.getMetadata(),
       };
-      if (state.requirePaymentProof) {
-        payload.mpesaCode = mpesaCode.trim().toUpperCase();
-        payload.paymentNote = paymentNote.trim();
-      }
 
       const { ok, data } = await api('/api/register', { method: 'POST', body: payload });
 
@@ -647,16 +627,17 @@
       else if (code === 'INVALID_PHONE') setFieldError('phone', message);
       else if (code === 'INVALID_GROUP') setFieldError('groupName', message);
       else if (code === 'DUPLICATE_REGNO') setFieldError('regNo', 'This registration number is already registered.');
-      else if (code === 'INVALID_MPESA_CODE') setFieldError('mpesaCode', message);
-      else if (code === 'DUPLICATE_MPESA_CODE') setFieldError('mpesaCode', message);
-      else if (code === 'PAYMENT_REQUIRED') setFieldError('mpesaCode', message);
-      else if (code === 'PAYMENT_NOTE_REQUIRED') setFieldError('paymentNote', message);
 
       if (code === 'DUPLICATE_REGNO') Alert.warning(message, { title: 'Duplicate registration' });
-      else if (code === 'GROUP_FULL') Alert.warning(message, { title: 'Group full' });
+      else if (code === 'GROUP_FULL') {
+        Alert.warning(message, { title: 'Group full' });
+        // Re-fetch config to refresh the dropdown with updated full/available status.
+        try {
+          const cfg = await api('/api/config');
+          if (cfg.ok && cfg.data && cfg.data.success) applyConfig(cfg.data);
+        } catch (_) {}
+      }
       else if (code === 'DEVICE_USED') Alert.warning(message, { title: 'Device already used' });
-      else if (code === 'DUPLICATE_MPESA_CODE') Alert.warning(message, { title: 'Code already used' });
-      else if (code === 'INVALID_MPESA_CODE') Alert.error(message, { title: 'Invalid M-Pesa code' });
       else if (code === 'REGISTRATION_CLOSED') {
         state.registrationOpen = false;
         applyConfig({ registrationOpen: false });
@@ -664,7 +645,7 @@
       } else if (
         code === 'INVALID_REQNO' || code === 'INVALID_NAME' ||
         code === 'INVALID_PHONE' || code === 'INVALID_GROUP' ||
-        code === 'PAYMENT_REQUIRED' || code === 'PAYMENT_NOTE_REQUIRED'
+        code === 'INVALID_DEVICE'
       ) {
         Alert.error(message, { title: 'Check your input' });
       } else if (!Alert.isShowing()) {
@@ -695,12 +676,6 @@
           ['Role', m.isLeader ? 'GROUP LEADER' : 'MEMBER'],
           ['Members in Group', `${g.memberCount || 0} / ${g.capacity || state.maxGroupMembers}`],
         ];
-        if (m.mpesaCode) {
-          rows.push(['M-Pesa Code', m.mpesaCode]);
-          if (m.paymentAmount != null) rows.push(['Amount Paid (KSH)', String(m.paymentAmount)]);
-          if (m.paymentNote) rows.push(['Time & Day Paid', m.paymentNote]);
-          if (m.paymentStatus) rows.push(['Payment Status', String(m.paymentStatus).toUpperCase()]);
-        }
         for (const [k, v] of rows) {
           details.appendChild(el('dt', { text: k }));
           details.appendChild(el('dd', { text: String(v) }));
@@ -734,8 +709,32 @@
     const logoutBtn = document.getElementById('member-logout-btn');
     const dashLogoutBtn = document.getElementById('dash-logout-btn');
     const refreshBtn = document.getElementById('dash-refresh-btn');
+    const loginGroupSelect = document.getElementById('loginGroupName');
 
     if (!loginView || !dashView) return;
+
+    const state = {
+      groups: [],
+      configLoaded: false,
+    };
+
+    // Fetch group list for the login dropdown.
+    (async () => {
+      try {
+        const { ok, data } = await api('/api/config');
+        if (ok && data && data.success) {
+          state.groups = Array.isArray(data.groups) ? data.groups : [];
+          state.configLoaded = true;
+          // Do NOT disable full groups on login — existing members may belong
+          // to a full group and still need to log in.
+          populateGroupSelect(loginGroupSelect, state.groups, {
+            disableFull: false,
+            placeholderText: 'Choose your group',
+            showCounts: false,
+          });
+        }
+      } catch (_) { /* leave select as-is */ }
+    })();
 
     const showLogin = () => {
       loginView.hidden = false;
@@ -762,20 +761,27 @@
         clearFieldErrors(loginForm);
         Alert.clear();
 
-        const groupName = ($('#loginGroupName') || {}).value || '';
+        const groupIndexRaw = loginGroupSelect ? loginGroupSelect.value : '';
         const regNo = ($('#loginRegNo') || {}).value || '';
+        const groupIndex = Number(groupIndexRaw);
 
         let hasError = false;
-        if (!groupName.trim()) { setFieldError('loginGroupName', 'Group name is required.'); hasError = true; }
+        if (!groupIndexRaw) {
+          setFieldError('loginGroupName', 'Please choose your group.');
+          hasError = true;
+        } else if (!Number.isInteger(groupIndex) || groupIndex < 1) {
+          setFieldError('loginGroupName', 'Please choose a valid group.');
+          hasError = true;
+        }
         if (!regNo.trim()) { setFieldError('loginRegNo', 'Registration number is required.'); hasError = true; }
         if (hasError) {
-          Alert.warning('Please enter both your Group Name and Registration Number.');
+          Alert.warning('Please enter both your Group and Registration Number.');
           return;
         }
 
         const { ok, data } = await api('/api/member/login', {
           method: 'POST',
-          body: { groupName: groupName.trim(), regNo: regNo.trim() },
+          body: { groupIndex, regNo: regNo.trim() },
         });
 
         if (ok && data && data.success) {
@@ -785,7 +791,7 @@
           showDashboard();
         } else {
           Alert.error(
-            (data && data.message) || 'Login failed. Check your group name and registration number.',
+            (data && data.message) || 'Login failed. Check your group and registration number.',
             { title: 'Login failed' }
           );
         }
@@ -839,7 +845,7 @@
 
       const countEl = document.getElementById('dash-member-count');
       const capEl = document.getElementById('dash-capacity');
-      const capacity = group.capacity || 10;
+      const capacity = group.capacity || 50;
       const memberCount = group.memberCount || members.length;
       if (countEl) countEl.textContent = String(memberCount);
       if (capEl) capEl.textContent = String(capacity);
@@ -902,7 +908,7 @@
     let currentGroupData = null;
     let currentSettings = null;
 
-    /* ---------- Status pills ---------- */
+    /* ---------- Status pill ---------- */
     function renderRegistrationStatus(open) {
       const pill = document.getElementById('submissions-status-pill');
       const help = document.getElementById('submissions-status-help');
@@ -926,22 +932,6 @@
       }
     }
 
-    function renderPaymentStatus(requirePaymentProof) {
-      const pill = document.getElementById('payment-status-pill');
-      const help = document.getElementById('payment-status-help');
-
-      if (pill) {
-        pill.textContent = requirePaymentProof ? 'ON' : 'OFF';
-        pill.classList.toggle('badge-full', requirePaymentProof);
-        pill.classList.toggle('badge-member', !requirePaymentProof);
-      }
-      if (help) {
-        help.textContent = requirePaymentProof
-          ? 'Students must submit an M-Pesa code (KSH 45 → Pochi).'
-          : 'M-Pesa code is not required on registration.';
-      }
-    }
-
     /* ---------- Settings form ---------- */
     const settingsForm = document.getElementById('settings-form');
     const settingsSaveBtn = document.getElementById('settings-save-btn');
@@ -951,26 +941,29 @@
     function fillSettingsForm(s) {
       if (!s) return;
       currentSettings = s;
-      const requireChk = document.getElementById('setting-require-payment');
-      const amountInp = document.getElementById('setting-payment-amount');
-      const phoneInp = document.getElementById('setting-payment-phone');
       const maxInp = document.getElementById('setting-max-members');
+      const totalInp = document.getElementById('setting-total-groups');
       const maxHelp = document.getElementById('setting-max-help');
+      const totalHelp = document.getElementById('setting-total-groups-help');
 
-      if (requireChk) requireChk.checked = s.requirePaymentProof === true;
-      if (amountInp) amountInp.value = s.paymentAmount != null ? String(s.paymentAmount) : '45';
-      if (phoneInp) phoneInp.value = s.paymentPhone || '0741742291';
       if (maxInp) {
-        maxInp.value = s.maxGroupMembers != null ? String(s.maxGroupMembers) : '10';
-        maxInp.max = String(s.maxGroupMembersHardLimit || 20);
+        maxInp.value = s.maxGroupMembers != null ? String(s.maxGroupMembers) : '50';
+        maxInp.max = String(s.maxGroupMembersHardLimit || 200);
+      }
+      if (totalInp) {
+        totalInp.value = s.totalGroups != null ? String(s.totalGroups) : '50';
+        totalInp.max = String(s.totalGroupsHardLimit || 200);
       }
       if (maxHelp && s.maxGroupMembersHardLimit) {
         maxHelp.textContent =
           `Between 1 and ${s.maxGroupMembersHardLimit}. Applies to new registrations only — existing groups keep their members.`;
       }
+      if (totalHelp && s.totalGroupsHardLimit) {
+        totalHelp.textContent =
+          `Between 1 and ${s.totalGroupsHardLimit}. Groups 1–N are pre-created automatically. You cannot reduce this below the highest group that still has members.`;
+      }
 
       renderRegistrationStatus(s.registrationOpen !== false);
-      renderPaymentStatus(s.requirePaymentProof === true);
 
       if (settingsSavedAt) {
         settingsSavedAt.textContent = 'Loaded from server at ' + new Date().toLocaleTimeString();
@@ -987,29 +980,21 @@
         e.preventDefault();
         clearFieldErrors(settingsForm);
 
-        const requireChk = document.getElementById('setting-require-payment');
-        const amountInp = document.getElementById('setting-payment-amount');
-        const phoneInp = document.getElementById('setting-payment-phone');
         const maxInp = document.getElementById('setting-max-members');
+        const totalInp = document.getElementById('setting-total-groups');
 
         const payload = {
-          requirePaymentProof: Boolean(requireChk && requireChk.checked),
-          paymentAmount: Number(amountInp ? amountInp.value : 45),
-          paymentPhone: phoneInp ? phoneInp.value.trim() : '',
-          maxGroupMembers: Number(maxInp ? maxInp.value : 10),
+          maxGroupMembers: Number(maxInp ? maxInp.value : 50),
+          totalGroups: Number(totalInp ? totalInp.value : 50),
         };
 
         let hasError = false;
-        if (!Number.isFinite(payload.paymentAmount) || payload.paymentAmount < 0) {
-          setFieldError('setting-payment-amount', 'Enter a valid amount (≥ 0).');
+        if (!Number.isFinite(payload.maxGroupMembers) || payload.maxGroupMembers < 1 || payload.maxGroupMembers > 200) {
+          setFieldError('setting-max-members', 'Must be between 1 and 200.');
           hasError = true;
         }
-        if (!payload.paymentPhone) {
-          setFieldError('setting-payment-phone', 'Payment phone is required.');
-          hasError = true;
-        }
-        if (!Number.isFinite(payload.maxGroupMembers) || payload.maxGroupMembers < 1 || payload.maxGroupMembers > 20) {
-          setFieldError('setting-max-members', 'Must be between 1 and 20.');
+        if (!Number.isFinite(payload.totalGroups) || payload.totalGroups < 1 || payload.totalGroups > 200) {
+          setFieldError('setting-total-groups', 'Must be between 1 and 200.');
           hasError = true;
         }
         if (hasError) {
@@ -1020,21 +1005,33 @@
         const { ok, data } = await api('/api/admin/settings', { method: 'POST', body: payload });
 
         if (ok && data && data.success) {
-          Alert.success(data.message || 'Settings saved.', { timeout: 2500 });
+          let msg = data.message || 'Settings saved.';
+          if (data.provisioning) {
+            const { created, deleted } = data.provisioning;
+            if (created > 0) msg += ` ${created} new group${created === 1 ? '' : 's'} created.`;
+            if (deleted > 0) msg += ` ${deleted} empty group${deleted === 1 ? '' : 's'} removed.`;
+          }
+          Alert.success(msg, { timeout: 3500 });
           fillSettingsForm({
             registrationOpen: data.registrationOpen,
-            requirePaymentProof: data.requirePaymentProof,
-            paymentAmount: data.paymentAmount,
-            paymentPhone: data.paymentPhone,
             maxGroupMembers: data.maxGroupMembers,
             maxGroupMembersHardLimit: data.maxGroupMembersHardLimit,
+            totalGroups: data.totalGroups,
+            totalGroupsHardLimit: data.totalGroupsHardLimit,
           });
           if (settingsSavedAt) {
             settingsSavedAt.textContent = 'Last saved at ' + new Date().toLocaleTimeString();
           }
           loadDashboard();
         } else {
-          Alert.error((data && data.message) || 'Could not save settings.');
+          const code = data && data.code;
+          const message = (data && data.message) || 'Could not save settings.';
+          if (code === 'GROUPS_HAVE_MEMBERS') {
+            setFieldError('setting-total-groups', message);
+            Alert.error(message, { title: 'Cannot reduce total groups' });
+          } else {
+            Alert.error(message);
+          }
         }
       }));
     }
@@ -1048,259 +1045,6 @@
           loadSettings();
         }
       });
-    }
-
-    /* ---------- Paste-and-verify ---------- */
-    const pasteForm = document.getElementById('paste-verify-form');
-    const pasteBtn = document.getElementById('paste-verify-btn');
-    const pasteText = document.getElementById('paste-verify-text');
-    const pasteClearBtn = document.getElementById('paste-verify-clear-btn');
-    const pasteResults = document.getElementById('paste-verify-results');
-
-    function clearPasteResults() {
-      if (pasteResults) {
-        pasteResults.hidden = true;
-        pasteResults.innerHTML = '';
-      }
-    }
-
-    if (pasteClearBtn) {
-      pasteClearBtn.addEventListener('click', () => {
-        if (pasteText) pasteText.value = '';
-        clearPasteResults();
-      });
-    }
-
-    if (pasteForm) {
-      pasteForm.addEventListener('submit', withLoading(pasteBtn, async (e) => {
-        e.preventDefault();
-        clearFieldErrors(pasteForm);
-        clearPasteResults();
-
-        const text = pasteText ? pasteText.value.trim() : '';
-        if (!text) {
-          setFieldError('paste-verify-text', 'Paste at least one M-Pesa message.');
-          return;
-        }
-
-        const { ok, data } = await api('/api/admin/verify-payments', {
-          method: 'POST',
-          body: { text },
-        });
-
-        if (ok && data && data.success) {
-          // Clear the textarea (ready for the next paste)
-          if (pasteText) pasteText.value = '';
-          renderVerifyResults(data);
-          Alert.success(
-            `Extraction complete — ${data.verifiedCount} newly verified.`,
-            { timeout: 3500 }
-          );
-          // Refresh pending list, dashboard tiles, and group view
-          loadPendingPayments();
-          loadDashboard();
-          if (currentGroupId) openGroup(currentGroupId);
-        } else {
-          Alert.error((data && data.message) || 'Could not verify payments.');
-        }
-      }));
-    }
-
-    function renderVerifyResults(payload) {
-      if (!pasteResults) return;
-      const results = payload.results || {};
-      const verified = results.verified || [];
-      const already = results.alreadyVerified || [];
-      const unmatched = results.unmatched || [];
-      const ambiguous = results.ambiguous || [];
-
-      pasteResults.innerHTML = '';
-
-      // Summary tiles
-      const grid = el('div', { class: 'verify-results-grid' }, [
-        el('div', { class: 'verify-stat' }, [
-          el('span', { class: 'verify-stat-label', text: 'Codes found' }),
-          el('span', { class: 'verify-stat-value', text: String(payload.total || 0) }),
-        ]),
-        el('div', { class: 'verify-stat' }, [
-          el('span', { class: 'verify-stat-label', text: 'Newly verified' }),
-          el('span', { class: 'verify-stat-value is-good', text: String(payload.verifiedCount || 0) }),
-        ]),
-        el('div', { class: 'verify-stat' }, [
-          el('span', { class: 'verify-stat-label', text: 'Already verified' }),
-          el('span', { class: 'verify-stat-value', text: String(payload.alreadyVerifiedCount || 0) }),
-        ]),
-        el('div', { class: 'verify-stat' }, [
-          el('span', { class: 'verify-stat-label', text: 'Unmatched' }),
-          el('span', { class: 'verify-stat-value is-warn', text: String(payload.unmatchedCount || 0) }),
-        ]),
-      ]);
-      pasteResults.appendChild(grid);
-
-      // Verified list
-      if (verified.length) {
-        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Newly Verified (${verified.length})` }));
-        const list = el('ul', { class: 'verify-list' });
-        verified.forEach((v) => {
-          list.appendChild(el('li', { class: 'is-verified' }, [
-            el('span', { class: 'verify-code', text: v.code }),
-            ' — ' + (v.name || '') + ' (' + (v.regNo || '') + ')',
-          ]));
-        });
-        pasteResults.appendChild(list);
-      }
-
-      // Already-verified list
-      if (already.length) {
-        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Already Verified (${already.length})` }));
-        const list = el('ul', { class: 'verify-list' });
-        already.forEach((v) => {
-          list.appendChild(el('li', { class: 'is-already' }, [
-            el('span', { class: 'verify-code', text: v.code }),
-            ' — ' + (v.name || '') + ' (' + (v.regNo || '') + ')',
-          ]));
-        });
-        pasteResults.appendChild(list);
-      }
-
-      // Unmatched list
-      if (unmatched.length) {
-        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Unmatched (${unmatched.length})` }));
-        const list = el('ul', { class: 'verify-list' });
-        unmatched.forEach((u) => {
-          const parts = [el('span', { class: 'verify-code', text: u.code })];
-          if (u.senderPhone) parts.push(' — phone ' + u.senderPhone);
-          if (u.amount != null) parts.push(' — KSH ' + u.amount);
-          list.appendChild(el('li', { class: 'is-unmatched' }, parts));
-        });
-        pasteResults.appendChild(list);
-      }
-
-      // Ambiguous list
-      if (ambiguous.length) {
-        pasteResults.appendChild(el('p', { class: 'verify-subhead', text: `Ambiguous (${ambiguous.length})` }));
-        const list = el('ul', { class: 'verify-list' });
-        ambiguous.forEach((a) => {
-          list.appendChild(el('li', { class: 'is-ambiguous' }, [
-            el('span', { class: 'verify-code', text: a.code }),
-            ` — phone ${a.senderPhone} matches ${a.count} members. Please verify manually.`,
-          ]));
-        });
-        pasteResults.appendChild(list);
-      }
-
-      pasteResults.hidden = false;
-      try { pasteResults.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
-    }
-
-    /* ---------- Pending payments ---------- */
-    const pendingBody = document.getElementById('pending-table-body');
-    const refreshPendingBtn = document.getElementById('btn-refresh-pending');
-
-    async function loadPendingPayments() {
-      if (!pendingBody) return;
-      const { ok, data } = await api('/api/admin/pending-payments');
-      if (!ok || !data || !data.success) {
-        if (data && data.code === 'AUTH_REQUIRED') return;
-        pendingBody.innerHTML = '<tr><td colspan="10" class="table-empty">Could not load pending payments.</td></tr>';
-        return;
-      }
-
-      const list = data.pending || [];
-      pendingBody.innerHTML = '';
-
-      if (list.length === 0) {
-        pendingBody.appendChild(el('tr', {}, [
-          el('td', { colspan: '10', class: 'table-empty', text: 'No pending or rejected payments.' }),
-        ]));
-        return;
-      }
-
-      list.forEach((p) => {
-        const tr = el('tr');
-
-        tr.appendChild(el('td', { text: p.paymentSubmittedAt ? formatDate(p.paymentSubmittedAt) : formatDate(p.createdAt) }));
-        tr.appendChild(el('td', { text: p.groupName || '—' }));
-        tr.appendChild(el('td', { class: 'mono', text: p.regNo }));
-        tr.appendChild(el('td', { text: p.name }));
-        tr.appendChild(el('td', { text: p.phone }));
-        tr.appendChild(el('td', { class: 'mono', text: p.mpesaCode || '—' }));
-        tr.appendChild(el('td', { text: p.paymentAmount != null ? String(p.paymentAmount) : '—' }));
-        tr.appendChild(el('td', { text: p.paymentNote ? truncate(p.paymentNote, 60) : '—' }));
-
-        const statusTd = el('td');
-        if (p.paymentStatus === 'rejected') {
-          statusTd.appendChild(el('span', { class: 'badge badge-rejected', text: 'REJECTED' }));
-        } else {
-          statusTd.appendChild(el('span', { class: 'badge badge-pending', text: 'PENDING' }));
-        }
-        tr.appendChild(statusTd);
-
-        const actionsTd = el('td');
-        const actions = el('div', { class: 'pending-actions' });
-
-        const verifyBtn = el('button', {
-          type: 'button',
-          class: 'btn btn-primary btn-small',
-          onClick: async () => {
-            const confirmed = await Modal.confirm(
-              `Mark ${p.name} (${p.regNo}) as verified? Do this only after confirming on your M-Pesa statement.`,
-              { title: 'Verify Payment', okText: 'Verify', cancelText: 'Cancel' }
-            );
-            if (!confirmed) return;
-            const { ok: vOk, data: vData } = await api(
-              `/api/admin/members/${encodeURIComponent(p.id)}/verify-payment`,
-              { method: 'POST', body: {} }
-            );
-            if (vOk && vData && vData.success) {
-              Alert.success(`${p.name} marked as verified.`, { timeout: 2500 });
-              loadPendingPayments();
-              loadDashboard();
-              if (currentGroupId) openGroup(currentGroupId);
-            } else {
-              Alert.error((vData && vData.message) || 'Could not verify payment.');
-            }
-          },
-        }, ['Verify']);
-        actions.appendChild(verifyBtn);
-
-        const rejectBtn = el('button', {
-          type: 'button',
-          class: 'btn btn-danger-outline btn-small',
-          onClick: async () => {
-            const reason = window.prompt(
-              `Reason for rejecting ${p.name}'s payment? (optional)`,
-              'Code could not be verified on M-Pesa statement.'
-            );
-            if (reason === null) return;
-            const { ok: rOk, data: rData } = await api(
-              `/api/admin/members/${encodeURIComponent(p.id)}/reject-payment`,
-              { method: 'POST', body: { reason: reason || '' } }
-            );
-            if (rOk && rData && rData.success) {
-              Alert.warning(`${p.name} marked as REJECTED.`, { timeout: 3000 });
-              loadPendingPayments();
-              loadDashboard();
-              if (currentGroupId) openGroup(currentGroupId);
-            } else {
-              Alert.error((rData && rData.message) || 'Could not reject payment.');
-            }
-          },
-        }, ['Reject']);
-        actions.appendChild(rejectBtn);
-
-        actionsTd.appendChild(actions);
-        tr.appendChild(actionsTd);
-
-        pendingBody.appendChild(tr);
-      });
-    }
-
-    if (refreshPendingBtn) {
-      refreshPendingBtn.addEventListener('click', withLoading(refreshPendingBtn, async () => {
-        await loadPendingPayments();
-        Alert.success('Pending list refreshed.', { timeout: 1500 });
-      }));
     }
 
     /* ---------- SSE ---------- */
@@ -1335,13 +1079,11 @@
             const g = payload.group || {};
             Alert.info(
               `${m.name || 'New member'} (${m.regNo || ''}) registered in "${g.name || ''}".` +
-                (payload.isLeader ? ' Assigned as Group Leader.' : '') +
-                (m.mpesaCode ? ` Paid: ${m.mpesaCode}` : ''),
+                (payload.isLeader ? ' Assigned as Group Leader.' : ''),
               { title: 'New registration', timeout: 6000 }
             );
           } catch (_) { /* ignore */ }
           refreshAll();
-          loadPendingPayments();
         });
 
         sse.addEventListener('registration-status', (ev) => {
@@ -1359,7 +1101,6 @@
           .forEach((evName) => {
             sse.addEventListener(evName, () => {
               refreshAll();
-              loadPendingPayments();
             });
           });
       } catch (err) {
@@ -1402,7 +1143,7 @@
     /* ---------- Session check ---------- */
     const me = await api('/api/admin/me');
     if (me.ok && me.data && me.data.success) {
-      await Promise.all([loadDashboard(), loadSettings(), loadPendingPayments()]);
+      await Promise.all([loadDashboard(), loadSettings()]);
       startSse();
       showDashboard();
     } else {
@@ -1432,7 +1173,7 @@
         if (ok && data && data.success) {
           Alert.success('Welcome, administrator.', { timeout: 2500 });
           loginForm.reset();
-          await Promise.all([loadDashboard(), loadSettings(), loadPendingPayments()]);
+          await Promise.all([loadDashboard(), loadSettings()]);
           startSse();
           showDashboard();
         } else {
@@ -1512,18 +1253,13 @@
       const totals = data.totals || {};
       const groups = data.groups || [];
       const recent = data.recent || [];
-      const maxGroupMembers = data.maxGroupMembers || 10;
+      const maxGroupMembers = data.maxGroupMembers || 50;
 
-      window.__peg_lastGroups = groups;
+      window.__itb9301_lastGroups = groups;
 
       setText('stat-total-members', totals.totalMembers != null ? totals.totalMembers : 0);
       setText('stat-total-groups', totals.totalGroups != null ? totals.totalGroups : 0);
       setText('stat-total-leaders', totals.totalLeaders != null ? totals.totalLeaders : 0);
-
-      setText('stat-paid', totals.paid != null ? totals.paid : 0);
-      setText('stat-pending', totals.pending != null ? totals.pending : 0);
-      setText('stat-rejected', totals.rejected != null ? totals.rejected : 0);
-      setText('stat-unpaid', totals.unpaid != null ? totals.unpaid : 0);
 
       const totalSlots = groups.length * maxGroupMembers;
       const usedSlots = groups.reduce((acc, g) => acc + (g.memberCount || 0), 0);
@@ -1536,7 +1272,7 @@
         recentBody.innerHTML = '';
         if (recent.length === 0) {
           recentBody.appendChild(el('tr', {}, [
-            el('td', { colspan: '7', class: 'table-empty', text: 'No registrations yet.' }),
+            el('td', { colspan: '6', class: 'table-empty', text: 'No registrations yet.' }),
           ]));
         } else {
           recent.forEach((m) => {
@@ -1552,7 +1288,6 @@
                 text: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
               }),
             ]));
-            tr.appendChild(buildPaymentCell(m));
             recentBody.appendChild(tr);
           });
         }
@@ -1562,7 +1297,7 @@
       if (grid) {
         grid.innerHTML = '';
         if (groups.length === 0) {
-          grid.appendChild(el('p', { class: 'muted', text: 'No groups yet. Click "+ New Group" to create one.' }));
+          grid.appendChild(el('p', { class: 'muted', text: 'No groups provisioned yet.' }));
         } else {
           groups.forEach((g) => grid.appendChild(buildGroupCard(g, maxGroupMembers)));
         }
@@ -1570,7 +1305,7 @@
     }
 
     function buildGroupCard(g, maxGroupMembers) {
-      const cap = g.capacity || maxGroupMembers || 10;
+      const cap = g.capacity || maxGroupMembers || 50;
       const isFull = g.memberCount >= cap;
       return el('button', {
         type: 'button',
@@ -1602,84 +1337,21 @@
     }
 
     function clearDashboard() {
-      ['stat-total-members', 'stat-total-groups', 'stat-total-leaders', 'stat-capacity-pct',
-       'stat-paid', 'stat-pending', 'stat-rejected', 'stat-unpaid']
+      ['stat-total-members', 'stat-total-groups', 'stat-total-leaders', 'stat-capacity-pct']
         .forEach((id) => setText(id, '0'));
       setText('stat-capacity-sub', '0 / 0 slots');
       const rb = document.getElementById('recent-table-body');
-      if (rb) rb.innerHTML = '<tr><td colspan="7" class="table-empty">Loading…</td></tr>';
+      if (rb) rb.innerHTML = '<tr><td colspan="6" class="table-empty">Loading…</td></tr>';
       const grid = document.getElementById('groups-list');
       if (grid) grid.innerHTML = '<p class="muted">Loading groups…</p>';
-      const pb = document.getElementById('pending-table-body');
-      if (pb) pb.innerHTML = '<tr><td colspan="10" class="table-empty">Loading…</td></tr>';
-      clearPasteResults();
     }
 
     /* ---------- Refresh button ---------- */
     const refreshBtn = document.getElementById('btn-refresh-dashboard');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', withLoading(refreshBtn, async () => {
-        await Promise.all([loadDashboard(), loadSettings(), loadPendingPayments()]);
+        await Promise.all([loadDashboard(), loadSettings()]);
         Alert.success('Refreshed.', { timeout: 1500 });
-      }));
-    }
-
-    /* ---------- Create group ---------- */
-    const createGroupBtn = document.getElementById('btn-create-group');
-    if (createGroupBtn) {
-      createGroupBtn.addEventListener('click', () => openGroupModal(null));
-    }
-
-    function openGroupModal(existing) {
-      const form = document.getElementById('group-form');
-      const title = document.getElementById('modal-group-title');
-      const idInput = document.getElementById('group-edit-id');
-      const nameInput = document.getElementById('group-name-input');
-      clearFieldErrors(form);
-
-      if (existing) {
-        if (title) title.textContent = 'Rename Group';
-        if (idInput) idInput.value = existing.id;
-        if (nameInput) nameInput.value = existing.name;
-      } else {
-        if (title) title.textContent = 'Create Group';
-        if (idInput) idInput.value = '';
-        if (nameInput) nameInput.value = '';
-      }
-      Modal.open('modal-group');
-    }
-
-    const groupForm = document.getElementById('group-form');
-    const groupSubmitBtn = document.getElementById('group-submit-btn');
-    if (groupForm) {
-      groupForm.addEventListener('submit', withLoading(groupSubmitBtn, async (e) => {
-        e.preventDefault();
-        clearFieldErrors(groupForm);
-
-        const id = (document.getElementById('group-edit-id') || {}).value || '';
-        const name = ((document.getElementById('group-name-input') || {}).value || '').trim();
-
-        if (!name) {
-          setFieldError('group-name-input', 'Group name is required.');
-          return;
-        }
-
-        const { ok, data } = id
-          ? await api(`/api/admin/groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: { name } })
-          : await api('/api/admin/groups', { method: 'POST', body: { name } });
-
-        if (ok && data && data.success) {
-          Modal.close('modal-group');
-          Alert.success(data.message || 'Saved.', { timeout: 2200 });
-          await loadDashboard();
-          if (id && currentGroupId === id) await openGroup(id);
-        } else {
-          const msg = (data && data.message) || 'Could not save group.';
-          if (data && data.code === 'DUPLICATE_GROUP') {
-            setFieldError('group-name-input', 'That name is already in use.');
-          }
-          Alert.error(msg);
-        }
       }));
     }
 
@@ -1705,14 +1377,14 @@
       setText('group-title', group.name || 'Group');
       setText('group-sub', `Group ID: ${group.id} · Created ${formatDateShort(group.createdAt)}`);
       setText('group-member-count', group.memberCount != null ? group.memberCount : members.length);
-      setText('group-capacity', group.capacity || 10);
+      setText('group-capacity', group.capacity || 50);
       setText('group-leader-name', group.leaderName || '—');
       setText('group-leader-regno', group.leaderRegNo ? `REG: ${group.leaderRegNo}` : '');
       setText('group-created', formatDateShort(group.createdAt));
 
       const statusEl = document.getElementById('group-status');
       if (statusEl) {
-        const isFull = (group.memberCount || members.length) >= (group.capacity || 10);
+        const isFull = (group.memberCount || members.length) >= (group.capacity || 50);
         statusEl.innerHTML = '';
         statusEl.appendChild(el('span', {
           class: 'badge ' + (isFull ? 'badge-full' : 'badge-open'),
@@ -1726,7 +1398,7 @@
 
       if (members.length === 0) {
         tbody.appendChild(el('tr', {}, [
-          el('td', { colspan: '7', class: 'table-empty', text: 'No members in this group yet.' }),
+          el('td', { colspan: '6', class: 'table-empty', text: 'No members in this group yet.' }),
         ]));
         return;
       }
@@ -1743,7 +1415,6 @@
             text: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
           }),
         ]));
-        tr.appendChild(buildPaymentCell(m));
         tr.appendChild(el('td', {}, [
           el('div', { class: 'row-actions' }, [
             el('button', {
@@ -1769,44 +1440,6 @@
       });
     }
 
-    const renameBtn = document.getElementById('btn-rename-group');
-    if (renameBtn) {
-      renameBtn.addEventListener('click', () => {
-        if (!currentGroupData) return;
-        openGroupModal(currentGroupData.group);
-      });
-    }
-
-    const deleteGroupBtn = document.getElementById('btn-delete-group');
-    if (deleteGroupBtn) {
-      deleteGroupBtn.addEventListener('click', async () => {
-        if (!currentGroupData) return;
-        const group = currentGroupData.group;
-        const memberCount = group.memberCount || 0;
-
-        let message = `Are you sure you want to delete "${group.name}"?`;
-        if (memberCount > 0) {
-          message = `"${group.name}" contains ${memberCount} member(s). Deleting the group will ALSO delete all of its members. Are you sure?`;
-        }
-        const confirmed = await Modal.confirm(message, {
-          title: 'Delete Group', okText: 'Delete', cancelText: 'Cancel',
-        });
-        if (!confirmed) return;
-
-        const url = `/api/admin/groups/${encodeURIComponent(group.id)}?confirm=true`;
-        const { ok, data } = await api(url, { method: 'DELETE' });
-
-        if (ok && data && data.success) {
-          Alert.success(data.message || 'Group deleted.', { timeout: 2500 });
-          currentGroupId = null;
-          await loadDashboard();
-          showDashboard();
-        } else {
-          Alert.error((data && data.message) || 'Could not delete group.');
-        }
-      });
-    }
-
     const addMemberBtn = document.getElementById('btn-add-member');
     if (addMemberBtn) {
       addMemberBtn.addEventListener('click', () => {
@@ -1825,16 +1458,14 @@
       const nameInput = document.getElementById('member-name');
       const phoneInput = document.getElementById('member-phone');
       const groupSelect = document.getElementById('member-group');
-      const mpesaInput = document.getElementById('member-mpesa');
-      const noteInput = document.getElementById('member-payment-note');
 
       if (groupSelect) {
         groupSelect.innerHTML = '';
-        const list = window.__peg_lastGroups || (currentGroupData && currentGroupData.group ? [currentGroupData.group] : []);
+        const list = window.__itb9301_lastGroups || (currentGroupData && currentGroupData.group ? [currentGroupData.group] : []);
         for (const g of list) {
           const opt = el('option', {
             value: g.id,
-            text: `${g.name} (${g.memberCount}/${g.capacity || 10})`,
+            text: `${g.name} (${g.memberCount}/${g.capacity || 50})`,
           });
           if (g.id === presetGroupId) opt.selected = true;
           groupSelect.appendChild(opt);
@@ -1848,8 +1479,6 @@
         if (nameInput) nameInput.value = member.name;
         if (phoneInput) phoneInput.value = member.phone;
         if (groupSelect) groupSelect.value = presetGroupId;
-        if (mpesaInput) mpesaInput.value = member.mpesaCode || '';
-        if (noteInput) noteInput.value = member.paymentNote || '';
       } else {
         if (title) title.textContent = 'Add Member';
         if (idInput) idInput.value = '';
@@ -1857,8 +1486,6 @@
         if (nameInput) nameInput.value = '';
         if (phoneInput) phoneInput.value = '';
         if (groupSelect) groupSelect.value = presetGroupId || '';
-        if (mpesaInput) mpesaInput.value = '';
-        if (noteInput) noteInput.value = '';
       }
       Modal.open('modal-member');
     }
@@ -1875,28 +1502,15 @@
         const name = ((document.getElementById('member-name') || {}).value || '').trim();
         const phone = ((document.getElementById('member-phone') || {}).value || '').trim();
         const groupId = ((document.getElementById('member-group') || {}).value || '').trim();
-        const mpesaCode = ((document.getElementById('member-mpesa') || {}).value || '').trim().toUpperCase();
-        const paymentNote = ((document.getElementById('member-payment-note') || {}).value || '').trim();
 
         let hasError = false;
         if (!regNo) { setFieldError('member-regNo', 'Registration number is required.'); hasError = true; }
         if (!name) { setFieldError('member-name', 'Full name is required.'); hasError = true; }
         if (!phone) { setFieldError('member-phone', 'Phone number is required.'); hasError = true; }
         if (!groupId) { setFieldError('member-group', 'Group is required.'); hasError = true; }
-        if (mpesaCode && !/^[A-Z0-9]{10}$/.test(mpesaCode)) {
-          setFieldError('member-mpesa', 'M-Pesa code must be 10 characters (A–Z, 0–9).');
-          hasError = true;
-        }
         if (hasError) return;
 
-        const payload = {
-          regNo,
-          name,
-          phone,
-          groupId,
-          mpesaCode: mpesaCode || '',
-          paymentNote: paymentNote || '',
-        };
+        const payload = { regNo, name, phone, groupId };
 
         const { ok, data } = id
           ? await api(`/api/admin/members/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload })
@@ -1907,14 +1521,12 @@
           Alert.success(data.message || 'Saved.', { timeout: 2200 });
           if (currentGroupId) await openGroup(currentGroupId);
           await loadDashboard();
-          loadPendingPayments();
         } else {
           const code = (data && data.code) || '';
           const msg = (data && data.message) || 'Could not save member.';
           if (code === 'DUPLICATE_REGNO') setFieldError('member-regNo', 'Already registered.');
           else if (code === 'INVALID_PHONE') setFieldError('member-phone', 'Invalid phone number.');
-          else if (code === 'INVALID_MPESA_CODE') setFieldError('member-mpesa', msg);
-          else if (code === 'DUPLICATE_MPESA_CODE') setFieldError('member-mpesa', msg);
+          else if (code === 'GROUP_FULL') Alert.warning(msg, { title: 'Group full' });
           Alert.error(msg);
         }
       }));
@@ -1935,14 +1547,13 @@
         Alert.success('Member deleted.', { timeout: 2000 });
         if (currentGroupId) await openGroup(currentGroupId);
         await loadDashboard();
-        loadPendingPayments();
       } else {
         Alert.error((data && data.message) || 'Could not delete member.');
       }
     }
 
     /* ---------- Export links: blur on click ---------- */
-    ['btn-export-csv', 'btn-export-pdf', 'btn-export-paid-pdf'].forEach((id) => {
+    ['btn-export-csv', 'btn-export-pdf'].forEach((id) => {
       const link = document.getElementById(id);
       if (link) link.addEventListener('click', (e) => e.currentTarget.blur());
     });
@@ -1954,7 +1565,7 @@
       openGroup(qsId);
     }
 
-    window.__peg_admin = { loadDashboard, openGroup, loadPendingPayments };
+    window.__itb9301_admin = { loadDashboard, openGroup };
   }
 
   /* ============================================================
@@ -1970,11 +1581,11 @@
     if (document.getElementById('register-form')) initRegisterPage();
 
     if (document.getElementById('member-login-form')) {
-      initMemberPage().catch((err) => console.error('[PEG] initMemberPage failed:', err));
+      initMemberPage().catch((err) => console.error('[ITB9301] initMemberPage failed:', err));
     }
 
     if (document.getElementById('admin-login-form')) {
-      initAdminPage().catch((err) => console.error('[PEG] initAdminPage failed:', err));
+      initAdminPage().catch((err) => console.error('[ITB9301] initAdminPage failed:', err));
     }
   }
 
@@ -1987,12 +1598,12 @@
   /* ============================================================
    * 14. Public API
    * ============================================================ */
-  window.PEG = window.PEG || {};
-  window.PEG.initMemberPage = initMemberPage;
-  window.PEG.initAdminPage = initAdminPage;
-  window.PEG.device = Device;
-  window.PEG.api = api;
-  window.PEG.alert = Alert;
-  window.PEG.modal = Modal;
+  window.ITB9301 = window.ITB9301 || {};
+  window.ITB9301.initMemberPage = initMemberPage;
+  window.ITB9301.initAdminPage = initAdminPage;
+  window.ITB9301.device = Device;
+  window.ITB9301.api = api;
+  window.ITB9301.alert = Alert;
+  window.ITB9301.modal = Modal;
 
 })();
