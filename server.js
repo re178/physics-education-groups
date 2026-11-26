@@ -3,16 +3,16 @@
 /* ============================================================================
  * ============================================================================
  *                                                                            *
- *   ██████╗ ██╗  ██╗██╗   ██╗███████╗██╗ ██████╗███████╗                      *
- *   ██╔══██╗██║  ██║╚██╗ ██╔╝██╔════╝██║██╔════╝██╔════╝                      *
- *   ██████╔╝███████║ ╚████╔╝ ███████╗██║██║     ███████╗                      *
- *   ██╔═══╝ ██╔══██║  ╚██╔╝  ╚════██║██║██║     ╚════██║                      *
- *   ██║     ██║  ██║   ██║   ███████║██║╚██████╗███████║                      *
- *   ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝ ╚═════╝╚══════╝                      *
+ *   ██╗████████╗██████╗  █████╗ ██████╗  ██████╗ ██╗                          *
+ *   ██║╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗██╔═████╗██║                          *
+ *   ██║   ██║   ██████╔╝╚█████╔╝██████╔╝██║██╔██║██║                          *
+ *   ██║   ██║   ██╔══██╗██╔══██╗██╔══██╗████╔╝██║██║                          *
+ *   ██║   ██║   ██████╔╝╚█████╔╝██║  ██║╚██████╔╝███████╗                     *
+ *   ╚═╝   ╚═╝   ╚═════╝  ╚════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝                     *
  *                                                                            *
- *   EDUCATION GROUPS — BACKEND SERVICE                                       *
+ *   INTERNET COMPUTING — BACKEND SERVICE                                     *
  *   File: server.js                                                          *
- *   Version: 1.5.0                                                           *
+ *   Version: 2.0.0                                                           *
  *   Runtime: Node.js >= 18.17                                                *
  *   Framework: Express 4                                                     *
  *   Database: MongoDB Atlas via Mongoose 8                                   *
@@ -25,107 +25,58 @@
  *  -----------------
  *   SECTION 1  — ENVIRONMENT & BOOTSTRAP
  *   SECTION 2  — UTILITIES & HELPERS
- *   SECTION 3  — M-PESA SMS EXTRACTOR
- *   SECTION 4  — DATABASE CONNECTION
- *   SECTION 5  — MONGOOSE MODELS
- *   SECTION 6  — SETTINGS & BUSINESS HELPERS
- *   SECTION 7  — SERVER-SENT EVENTS (SSE)
- *   SECTION 8  — EXPRESS APP & MIDDLEWARE
- *   SECTION 9  — PUBLIC ROUTES
- *   SECTION 10 — MEMBER ROUTES
- *   SECTION 11 — ADMIN ROUTES
- *   SECTION 12 — CSV EXPORT
- *   SECTION 13 — PDF EXPORT
- *   SECTION 14 — SSE ENDPOINT
- *   SECTION 15 — STATIC FILES & PAGE ROUTES
- *   SECTION 16 — 404 & ERROR HANDLERS
- *   SECTION 17 — SERVER STARTUP & SHUTDOWN
+ *   SECTION 3  — DATABASE CONNECTION
+ *   SECTION 4  — MONGOOSE MODELS
+ *   SECTION 5  — SETTINGS & BUSINESS HELPERS
+ *   SECTION 6  — SERVER-SENT EVENTS (SSE)
+ *   SECTION 7  — EXPRESS APP & MIDDLEWARE
+ *   SECTION 8  — PUBLIC ROUTES
+ *   SECTION 9  — MEMBER ROUTES
+ *   SECTION 10 — ADMIN ROUTES
+ *   SECTION 11 — CSV EXPORT
+ *   SECTION 12 — PDF EXPORT
+ *   SECTION 13 — SSE ENDPOINT
+ *   SECTION 14 — STATIC FILES & PAGE ROUTES
+ *   SECTION 15 — 404 & ERROR HANDLERS
+ *   SECTION 16 — SERVER STARTUP & SHUTDOWN
  *
  *  CHANGE LOG
  *  ----------
  *   v1.0.0 — Initial release. Basic registration, groups, members, admin.
  *   v1.1.0 — Added PDF export, admin dashboard, SSE, leader reconciliation.
- *   v1.2.0 — Added registration open/close toggle, Settings collection,
- *             muted professional PDF colors.
- *   v1.3.0 — Added configurable max group members (1–20), M-Pesa code
- *             capture fields, payment-config public endpoint.
- *   v1.4.0 — Added paid-PDF export, separate clean PDF/CSV from payment
- *             data, paid-summary endpoint.
- *   v1.5.0 — Added admin paste-and-verify workflow (M-Pesa SMS extractor),
- *             paymentStatus enum (pending/verified/rejected), unique
- *             mpesaCode sparse index, pending-payments listing, per-member
- *             verify/reject endpoints, hard M-Pesa code validation,
- *             duplicate M-Pesa code rejection.
+ *   v1.2.0 — Added registration open/close toggle, Settings collection.
+ *   v1.3.0 — Added configurable max group members (1–20).
+ *   v1.4.0 — Added clean PDF/CSV exports.
+ *   v1.5.0 — Added M-Pesa paste-and-verify and payment tracking.
+ *   v2.0.0 — Removed ALL payment features. Rebranded to
+ *             "ITB9301 - INTERNET COMPUTING". Settings now expose only
+ *             registration_open and max_group_members.
  *
  *  ARCHITECTURE NOTES
  *  ------------------
- *   This is a single-file Express backend. All routes, models, middleware,
- *   and business logic are contained here for simplicity of deployment to
- *   Render. There is no separate build step, no transpilation, and no
- *   external state beyond MongoDB.
+ *   Single-file Express backend. No build step, no transpilation,
+ *   no external state beyond MongoDB.
  *
  *   Data flow for public registration:
  *     1. Client posts { regNo, name, phone, groupName, deviceId,
- *                       deviceMetadata, [mpesaCode, paymentNote] }.
- *     2. Server reads current settings (open/closed, payment required,
- *        amount, phone, max members).
+ *                       deviceMetadata }.
+ *     2. Server reads current settings (open/closed, max members).
  *     3. Server validates every field.
- *     4. If payment proof required: validates M-Pesa code format, checks
- *        for duplicates, stores code with status 'pending'.
- *     5. Server finds or creates the group (case/whitespace normalized).
- *     6. Server performs an ATOMIC findOneAndUpdate on the group to
- *        increment memberCount only if below the current max. This
- *        eliminates race conditions when two members register at once
- *        for the last available slot.
- *     7. Server inserts the Member document. On failure, it rolls back
+ *     4. Server finds or creates the group (case/whitespace normalized).
+ *     5. Server performs an ATOMIC findOneAndUpdate on the group to
+ *        increment memberCount only if below the current max.
+ *     6. Server inserts the Member document. On failure, rolls back
  *        the capacity increment.
- *     8. If this was the first member, it becomes the Group Leader.
- *     9. Server broadcasts an SSE 'registration' event for the admin
+ *     7. If this was the first member, it becomes the Group Leader.
+ *     8. Server broadcasts an SSE 'registration' event for the admin
  *        dashboard.
- *    10. Server responds with the created member + group + payment info.
- *
- *   Data flow for admin payment verification:
- *     1. Admin pastes one or more M-Pesa SMS messages into a textarea.
- *     2. Client POSTs { text: '<pasted content>' } to
- *        /api/admin/verify-payments.
- *     3. Server extracts every 10-char alphanumeric token that looks
- *        like an M-Pesa code (near the word 'Confirmed' or at a line
- *        boundary).
- *     4. For each extracted code:
- *          a. Look for a member with that exact mpesaCode.
- *          b. If not found, extract the sender phone from the surrounding
- *             text and look for a unique member with that phone.
- *          c. If still ambiguous, report it back to the admin.
- *     5. Matched members get paymentStatus = 'verified', and
- *        paymentVerifiedAt / paymentVerifiedBy are stamped.
- *     6. Server returns a breakdown of verified / already / unmatched /
- *        ambiguous entries for the admin to review.
  *
  *  SECURITY LAYERS
  *  ---------------
- *   - Helmet: sets Content-Security-Policy, X-Frame-Options,
- *     X-Content-Type-Options, Referrer-Policy, HSTS (in production).
- *   - CORS: same-origin by default; explicit allow-list via CORS_ORIGIN.
- *   - Cookie parser: enables HTTP-only session cookies.
- *   - Rate limiting: general (400/15min), register (25/15min),
- *     login (25/15min). Applies to /api/* routes.
- *   - CSRF: double-submit cookie. A token is issued at /api/csrf-token
- *     and must be echoed in the X-CSRF-Token header on every mutating
- *     request (POST, PATCH, DELETE).
- *   - Auth: HTTP-only cookies holding an opaque session token stored in
- *     the AdminSession collection. Admin and member sessions are
- *     separate cookies.
- *   - Password hashing: scrypt with a random 16-byte salt and 64-byte
- *     key. Timing-safe comparison.
- *   - Device fingerprint: browser-generated ID stored with each member;
- *     unique sparse index prevents duplicate registrations from the
- *     same device.
- *   - Unique REG number and unique M-Pesa code, both enforced by
- *     MongoDB unique indexes.
- *   - No raw IP storage: an optional HMAC-SHA256 hash (keyed with
- *     SESSION_SECRET) can be stored instead.
- *   - Centralized error handler: strips stack traces and Mongo internals
- *     from user-visible responses.
+ *   - Helmet, CORS, cookie-parser, rate limiters, CSRF (double-submit
+ *     cookie), HTTP-only session cookies (AdminSession collection),
+ *     scrypt password hashing, unique REG number + device fingerprint,
+ *     optional HMAC-SHA256 IP hash, centralized error handler.
  *
  * ============================================================================
  */
@@ -133,10 +84,6 @@
 // ============================================================================
 // MODULE IMPORTS
 // ============================================================================
-// All imports are at the top so their presence is obvious and the rest of
-// the file can assume they exist. We deliberately avoid importing anything
-// that isn't strictly necessary — no lodash, no uuid, no bcrypt (Node's
-// built-in crypto provides scrypt which is sufficient).
 
 const path = require('path');
 const fs = require('fs');
@@ -153,25 +100,8 @@ const PDFDocument = require('pdfkit');
 
 /* ============================================================================
  * SECTION 1 — ENVIRONMENT & BOOTSTRAP
- * ============================================================================
- *
- * Responsibilities:
- *   - Load .env if present (development convenience).
- *   - Read every environment variable into a strongly-typed constant.
- *   - Validate required variables and fail fast with a clear message.
- *   - Expose a frozen CONFIG object used everywhere else.
- *
- * Never logs secrets (SESSION_SECRET, ADMIN_PASSWORD, MONGODB_URI contents).
  * ========================================================================== */
 
-/**
- * Load a .env file from the current working directory if one exists.
- * In production (Render), environment variables are injected directly
- * into process.env, so this is a no-op there.
- *
- * Failure to load .env is a warning, not an error: the app can still run
- * if the environment variables were set externally.
- */
 (function loadDotenv() {
   try {
     const dotenv = require('dotenv');
@@ -187,25 +117,11 @@ const PDFDocument = require('pdfkit');
   }
 })();
 
-/**
- * Read an environment variable as a trimmed string.
- * @param {string} key - The variable name.
- * @param {string} [fallback=''] - Value to use when the variable is unset.
- * @returns {string}
- */
 const readString = (key, fallback = '') => {
   const v = process.env[key];
   return v == null ? fallback : String(v).trim();
 };
 
-/**
- * Read an environment variable as a boolean.
- * Accepts 1/true/yes/on/enabled (case-insensitive) as truthy.
- * Accepts 0/false/no/off/disabled/empty as falsy.
- * @param {string} key - The variable name.
- * @param {boolean} [fallback=false] - Value when unset or unparseable.
- * @returns {boolean}
- */
 const readBool = (key, fallback = false) => {
   const v = readString(key, String(fallback)).toLowerCase();
   if (['1', 'true', 'yes', 'on', 'enabled'].includes(v)) return true;
@@ -213,34 +129,17 @@ const readBool = (key, fallback = false) => {
   return fallback;
 };
 
-/**
- * Read an environment variable as a base-10 integer.
- * @param {string} key - The variable name.
- * @param {number} [fallback=0] - Value when unset or unparseable.
- * @returns {number}
- */
 const readInt = (key, fallback = 0) => {
   const v = readString(key, String(fallback));
   const n = Number.parseInt(v, 10);
   return Number.isFinite(n) ? n : fallback;
 };
 
-/**
- * Read an environment variable as a comma-separated list of strings.
- * Trims each entry and drops empty values.
- * @param {string} key - The variable name.
- * @param {string[]} [fallback=[]] - Value when unset.
- * @returns {string[]}
- */
 const readList = (key, fallback = []) => {
   const v = readString(key, '');
   if (!v) return fallback;
   return v.split(',').map((s) => s.trim()).filter(Boolean);
 };
-
-// ----------------------------------------------------------------------------
-// Read environment into local constants
-// ----------------------------------------------------------------------------
 
 const NODE_ENV = readString('NODE_ENV', 'development') || 'development';
 const IS_PROD = NODE_ENV === 'production';
@@ -259,15 +158,6 @@ const CORS_ORIGIN = readList('CORS_ORIGIN', []);
 const STORE_IP_HASH = readBool('STORE_IP_HASH', false);
 const ENFORCE_DEVICE_LOCK = readBool('ENFORCE_DEVICE_LOCK', true);
 
-// ----------------------------------------------------------------------------
-// Fail-fast validation
-// ----------------------------------------------------------------------------
-//
-// We validate at startup so that misconfiguration is caught before the
-// server binds to a port. This avoids the situation where Render reports
-// "deployed" but every request errors because a required variable is
-// missing.
-
 if (!MONGODB_URI) {
   console.error('\n[env] FATAL: MONGODB_URI is required.\n');
   process.exit(1);
@@ -281,22 +171,11 @@ if (IS_PROD && (!SESSION_SECRET_RAW || SESSION_SECRET_RAW.length < 24)) {
   process.exit(1);
 }
 
-/**
- * Effective session secret.
- * Uses the environment value if it is at least 24 characters; otherwise
- * generates a fresh random secret for development. In production we
- * have already exited above if the value is missing/short.
- */
 const SESSION_SECRET =
   SESSION_SECRET_RAW && SESSION_SECRET_RAW.length >= 24
     ? SESSION_SECRET_RAW
     : crypto.randomBytes(48).toString('hex');
 
-/**
- * Frozen application configuration.
- * All fields are read-only. If you need to change behaviour, change the
- * environment variables and restart the server.
- */
 const CONFIG = Object.freeze({
   NODE_ENV,
   IS_PROD,
@@ -310,81 +189,32 @@ const CONFIG = Object.freeze({
   STORE_IP_HASH,
   ENFORCE_DEVICE_LOCK,
 
-  // Absolute ceiling on group size — the effective cap is stored in the
-  // Settings collection under 'max_group_members' (admin-configurable).
   MAX_GROUP_MEMBERS_HARD_LIMIT: 20,
   MAX_GROUP_MEMBERS_DEFAULT: 10,
 
-  // Cookie names
-  ADMIN_COOKIE: 'peg_admin_sid',
-  MEMBER_COOKIE: 'peg_member_sid',
-  CSRF_COOKIE: 'peg_csrf',
+  ADMIN_COOKIE: 'itb9301_admin_sid',
+  MEMBER_COOKIE: 'itb9301_member_sid',
+  CSRF_COOKIE: 'itb9301_csrf',
   CSRF_HEADER: 'x-csrf-token',
 
-  // Session lifetimes (milliseconds)
-  ADMIN_SESSION_TTL_MS: 8 * 60 * 60 * 1000,   // 8 hours
-  MEMBER_SESSION_TTL_MS: 12 * 60 * 60 * 1000, // 12 hours
-  CSRF_TTL_MS: 4 * 60 * 60 * 1000,            // 4 hours
+  ADMIN_SESSION_TTL_MS: 8 * 60 * 60 * 1000,
+  MEMBER_SESSION_TTL_MS: 12 * 60 * 60 * 1000,
+  CSRF_TTL_MS: 4 * 60 * 60 * 1000,
 
-  // Cookie flags
   COOKIE_SECURE: IS_PROD,
   COOKIE_SAME_SITE: 'strict',
 });
 
-console.log(`[boot] Physics Education Groups starting in ${NODE_ENV} mode on port ${PORT}.`);
+console.log(`[boot] ITB9301 - INTERNET COMPUTING starting in ${NODE_ENV} mode on port ${PORT}.`);
 
 /* ============================================================================
  * SECTION 2 — UTILITIES & HELPERS
- * ============================================================================
- *
- * Pure functions with no side effects. These are used throughout the
- * application for input normalization, validation, password hashing,
- * and response shaping.
- *
- * Every function here is safe to call with null or undefined input.
  * ========================================================================== */
 
-// ----------------------------------------------------------------------------
-// Logging helpers
-// ----------------------------------------------------------------------------
-//
-// Consistent prefixes make it easy to grep Render logs for a specific
-// category. We never log secrets.
+function logInfo(...args) { console.log('[itb9301]', ...args); }
+function logWarn(...args) { console.warn('[itb9301]', ...args); }
+function logError(...args) { console.error('[itb9301]', ...args); }
 
-/**
- * Log an informational message with the standard [peg] prefix.
- * @param {...any} args
- */
-function logInfo(...args) {
-  // eslint-disable-next-line no-console
-  console.log('[peg]', ...args);
-}
-
-/**
- * Log a warning with the standard [peg] prefix.
- * @param {...any} args
- */
-function logWarn(...args) {
-  // eslint-disable-next-line no-console
-  console.warn('[peg]', ...args);
-}
-
-/**
- * Log an error with the standard [peg] prefix.
- * @param {...any} args
- */
-function logError(...args) {
-  // eslint-disable-next-line no-console
-  console.error('[peg]', ...args);
-}
-
-/**
- * Truncate a string to a maximum length, appending an ellipsis if cut.
- * Safe on null/undefined (returns '').
- * @param {any} value
- * @param {number} [max=120]
- * @returns {string}
- */
 function truncate(value, max = 120) {
   if (value == null) return '';
   const s = String(value);
@@ -392,11 +222,6 @@ function truncate(value, max = 120) {
   return s.slice(0, Math.max(0, max - 1)) + '…';
 }
 
-/**
- * Format a byte count into a human-readable string.
- * @param {number} bytes
- * @returns {string}
- */
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -409,20 +234,8 @@ function formatBytes(bytes) {
   return `${n.toFixed(n < 10 && i > 0 ? 2 : 0)} ${units[i]}`;
 }
 
-/**
- * Return the current time as an ISO 8601 string.
- * @returns {string}
- */
-function nowIso() {
-  return new Date().toISOString();
-}
+function nowIso() { return new Date().toISOString(); }
 
-/**
- * Pick a subset of keys from an object.
- * @param {object} obj
- * @param {string[]} keys
- * @returns {object}
- */
 function pick(obj, keys) {
   const out = {};
   if (!obj || typeof obj !== 'object') return out;
@@ -432,12 +245,6 @@ function pick(obj, keys) {
   return out;
 }
 
-/**
- * Return a copy of an object without the specified keys.
- * @param {object} obj
- * @param {string[]} keys
- * @returns {object}
- */
 function omit(obj, keys) {
   const out = {};
   if (!obj || typeof obj !== 'object') return out;
@@ -448,38 +255,11 @@ function omit(obj, keys) {
   return out;
 }
 
-/**
- * Safe JSON parse. Returns the fallback on any error.
- * @param {string} text
- * @param {any} [fallback=null]
- * @returns {any}
- */
 function safeJsonParse(text, fallback = null) {
   try { return JSON.parse(text); }
   catch (_) { return fallback; }
 }
 
-// ----------------------------------------------------------------------------
-// Group name normalization
-// ----------------------------------------------------------------------------
-
-/**
- * Normalize a group name for comparison.
- *
- * Steps:
- *   1. Strip control characters.
- *   2. Collapse runs of whitespace into a single space.
- *   3. Trim leading/trailing whitespace.
- *   4. Lowercase.
- *
- * Examples:
- *   "  Group A  "    → "group a"
- *   "GROUP   A"      → "group a"
- *   "Group\tA\n"     → "group a"
- *
- * @param {any} raw
- * @returns {string}
- */
 function normalizeGroupName(raw) {
   if (raw == null) return '';
   return String(raw)
@@ -489,12 +269,6 @@ function normalizeGroupName(raw) {
     .toLowerCase();
 }
 
-/**
- * Prepare a group name for display: strips control characters, collapses
- * whitespace, trims, but preserves the user's original casing.
- * @param {any} raw
- * @returns {string}
- */
 function displayGroupName(raw) {
   if (raw == null) return '';
   return String(raw)
@@ -503,16 +277,6 @@ function displayGroupName(raw) {
     .trim();
 }
 
-// ----------------------------------------------------------------------------
-// Registration number normalization
-// ----------------------------------------------------------------------------
-
-/**
- * Normalize a registration number.
- * Trims, removes whitespace, uppercases.
- * @param {any} raw
- * @returns {string}
- */
 function normalizeRegNo(raw) {
   if (raw == null) return '';
   return String(raw)
@@ -522,16 +286,6 @@ function normalizeRegNo(raw) {
     .toUpperCase();
 }
 
-// ----------------------------------------------------------------------------
-// Person name normalization
-// ----------------------------------------------------------------------------
-
-/**
- * Normalize a person's name: strips control characters and collapses
- * internal whitespace but preserves casing and punctuation.
- * @param {any} raw
- * @returns {string}
- */
 function normalizeName(raw) {
   if (raw == null) return '';
   return String(raw)
@@ -540,24 +294,6 @@ function normalizeName(raw) {
     .trim();
 }
 
-// ----------------------------------------------------------------------------
-// Phone normalization
-// ----------------------------------------------------------------------------
-
-/**
- * Normalize a Kenyan phone number to E.164 (+2547XXXXXXXX or +2541XXXXXXXX).
- *
- * Accepts:
- *   0712345678
- *   0112345678
- *   254712345678
- *   254112345678
- *   +254712345678
- *   +254112345678
- *
- * @param {any} raw
- * @returns {string|null}  E.164 form, or null if unparseable.
- */
 function normalizePhone(raw) {
   if (raw == null) return null;
   let s = String(raw).replace(/[\s\-().]/g, '');
@@ -567,26 +303,6 @@ function normalizePhone(raw) {
   return null;
 }
 
-/**
- * Alias used when the phone number represents the payment destination
- * (Pochi). Same normalization as a regular phone.
- * @param {any} raw
- * @returns {string|null}
- */
-function normalizePochiPhone(raw) {
-  return normalizePhone(raw);
-}
-
-// ----------------------------------------------------------------------------
-// Device ID validation
-// ----------------------------------------------------------------------------
-
-/**
- * Validate a device fingerprint ID.
- * Must be 8–128 chars, alphanumeric plus - _ :
- * @param {any} id
- * @returns {boolean}
- */
 function isValidDeviceId(id) {
   if (!id || typeof id !== 'string') return false;
   const t = id.trim();
@@ -594,175 +310,27 @@ function isValidDeviceId(id) {
   return /^[A-Za-z0-9_\-:]+$/.test(t);
 }
 
-// ----------------------------------------------------------------------------
-// Field validators
-// ----------------------------------------------------------------------------
-
-/**
- * Is the given value a usable group name?
- * @param {any} raw
- * @returns {boolean}
- */
 function isValidGroupName(raw) {
   const n = normalizeGroupName(raw);
   return Boolean(n) && n.length <= 80;
 }
 
-/**
- * Is the given value a usable registration number?
- * Allowed: A–Z, 0–9, -, /, _, .
- * @param {any} raw
- * @returns {boolean}
- */
 function isValidRegNo(raw) {
   const n = normalizeRegNo(raw);
   if (n.length < 3 || n.length > 40) return false;
   return /^[A-Z0-9\-\/_.]+$/.test(n);
 }
 
-/**
- * Is the given value a usable person name?
- * Allows letters (any script), marks, digits, space, ., ,, ', -, (, ).
- * @param {any} raw
- * @returns {boolean}
- */
 function isValidName(raw) {
   const n = normalizeName(raw);
   if (n.length < 2 || n.length > 120) return false;
   return /^[\p{L}\p{M}0-9 .,'\-()]+$/u.test(n);
 }
 
-/**
- * Is the given value a valid Kenyan phone number?
- * @param {any} raw
- * @returns {boolean}
- */
 function isValidKenyanPhone(raw) {
   return normalizePhone(raw) !== null;
 }
 
-// ----------------------------------------------------------------------------
-// M-Pesa code normalization & hard validation
-// ----------------------------------------------------------------------------
-
-/**
- * Normalize an M-Pesa confirmation code.
- * Trims, removes whitespace, uppercases.
- * @param {any} raw
- * @returns {string}
- */
-function normalizeMpesaCode(raw) {
-  if (raw == null) return '';
-  return String(raw)
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/\s+/g, '')
-    .trim()
-    .toUpperCase();
-}
-
-/**
- * Perform hard validation of an M-Pesa code.
- *
- * Real M-Pesa confirmation codes are 10 characters long, mix letters and
- * digits, and never form obvious patterns. This function rejects:
- *   - Wrong length
- *   - Non-alphanumeric characters
- *   - Missing letters or missing digits
- *   - All-same-character strings (AAAAAAAAAA)
- *   - Runs of the same character (AAAAABCDEF)
- *   - Well-known sequential patterns (1234567890, ABCDEFGHIJ, QWERTYUIOP)
- *   - Codes containing common fake words (TEST, FAKE, PAID, MONEY, etc.)
- *
- * This is NOT a live verification. It only rejects obvious fakes. The
- * admin's paste-and-verify workflow is the authoritative check.
- *
- * @param {any} rawCode
- * @returns {{valid: boolean, code?: string, reason?: string}}
- */
-function validateMpesaCodeHard(rawCode) {
-  const code = normalizeMpesaCode(rawCode);
-
-  if (!code) return { valid: false, reason: 'M-Pesa code is required.' };
-
-  if (code.length !== 10) {
-    return { valid: false, reason: 'M-Pesa code must be exactly 10 characters.' };
-  }
-
-  if (!/^[A-Z0-9]{10}$/.test(code)) {
-    return { valid: false, reason: 'M-Pesa code can only contain letters A–Z and digits 0–9.' };
-  }
-
-  if (!/[A-Z]/.test(code)) {
-    return { valid: false, reason: 'M-Pesa code must contain at least one letter.' };
-  }
-
-  if (!/[0-9]/.test(code)) {
-    return { valid: false, reason: 'M-Pesa code must contain at least one digit.' };
-  }
-
-  // All-same-character: AAAAAAAAAA
-  if (/^(.)\1+$/.test(code)) {
-    return { valid: false, reason: 'M-Pesa code cannot be a repeated character.' };
-  }
-
-  // First five characters identical: AAAAABCDEF
-  if (/^(.)\1{4}/.test(code)) {
-    return { valid: false, reason: 'This code looks invalid. Please enter the code from your M-Pesa SMS.' };
-  }
-
-  // Known sequential/keyboard patterns
-  const badPatterns = [
-    '0123456789', '1234567890', '0987654321', '9876543210',
-    'ABCDEFGHIJ', 'BCDEFGHIJK', 'JIHGFEDCBA', 'KJIHGFEDCB',
-    'QWERTYUIOP', 'ASDFGHJKLZ', 'ZXCVBNMLKJ', 'POIUYTREWQ',
-  ];
-  for (const p of badPatterns) {
-    if (code === p) return { valid: false, reason: 'This is a pattern, not a real M-Pesa code.' };
-    if (code.includes(p.slice(0, 6))) {
-      return { valid: false, reason: 'This looks like a pattern. Enter the code from your SMS.' };
-    }
-  }
-
-  // Common fake words that appear in made-up codes
-  const fakeWords = ['TEST', 'FAKE', 'PAID', 'MONEY', 'ADMIN', 'LUCKY', 'TRUST'];
-  for (const w of fakeWords) {
-    if (code.includes(w)) {
-      return { valid: false, reason: 'This looks like a made-up code. Enter the code from your SMS.' };
-    }
-  }
-
-  return { valid: true, code };
-}
-
-// ----------------------------------------------------------------------------
-// Payment note sanitization
-// ----------------------------------------------------------------------------
-
-/**
- * Sanitize the free-text payment note the student enters (time & day
- * they paid). Caps at 200 characters.
- * @param {any} raw
- * @returns {string}
- */
-function sanitizePaymentNote(raw) {
-  if (raw == null) return '';
-  return String(raw)
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 200);
-}
-
-// ----------------------------------------------------------------------------
-// Device metadata sanitization
-// ----------------------------------------------------------------------------
-
-/**
- * Sanitize non-sensitive device metadata. Only known keys are kept,
- * strings are length-capped, and only primitive values are accepted.
- * @param {any} meta
- * @returns {object}
- */
 function sanitizeDeviceMetadata(meta) {
   if (!meta || typeof meta !== 'object') return {};
 
@@ -800,42 +368,17 @@ function sanitizeDeviceMetadata(meta) {
   };
 }
 
-// ----------------------------------------------------------------------------
-// Hashing helpers
-// ----------------------------------------------------------------------------
-
-/**
- * Compute a keyed HMAC-SHA256 of the client IP for abuse detection.
- * Never stores the raw IP. Uses SESSION_SECRET as the key so the hash
- * cannot be reversed by rainbow tables.
- * @param {string} ip
- * @returns {string|null}
- */
 function hashIp(ip) {
   if (!ip) return null;
   return crypto.createHmac('sha256', SESSION_SECRET).update(String(ip)).digest('hex');
 }
 
-/**
- * Hash a password using scrypt with a fresh random salt.
- * Returns { salt, hash } as hex strings.
- * @param {string} password
- * @returns {{salt: string, hash: string}}
- */
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(password, salt, 64).toString('hex');
   return { salt, hash };
 }
 
-/**
- * Verify a password against a stored salt and hash using timing-safe
- * comparison.
- * @param {string} password
- * @param {string} salt
- * @param {string} hash
- * @returns {boolean}
- */
 function verifyPassword(password, salt, hash) {
   try {
     const candidate = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -848,12 +391,6 @@ function verifyPassword(password, salt, hash) {
   }
 }
 
-/**
- * Timing-safe string comparison.
- * @param {string} a
- * @param {string} b
- * @returns {boolean}
- */
 function safeEqual(a, b) {
   const ba = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
@@ -861,22 +398,9 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ba, bb);
 }
 
-// ----------------------------------------------------------------------------
-// Express helpers
-// ----------------------------------------------------------------------------
-
-/**
- * Wrap an async route handler so that rejected promises flow to the
- * centralized error middleware instead of crashing the process.
- * @param {Function} fn
- * @returns {Function}
- */
 const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
-/**
- * Application-level error with a code and HTTP status.
- */
 class AppError extends Error {
   constructor(message, code = 'ERROR', status = 400) {
     super(message);
@@ -886,168 +410,23 @@ class AppError extends Error {
   }
 }
 
-/**
- * Send a success response.
- * @param {import('express').Response} res
- * @param {object} [payload={}]
- * @param {number} [status=200]
- */
 function ok(res, payload = {}, status = 200) {
   return res.status(status).json({ success: true, ...payload });
 }
 
-/**
- * Send an error response.
- * @param {import('express').Response} res
- * @param {string} message
- * @param {string} [code='ERROR']
- * @param {number} [status=400]
- */
 function fail(res, message, code = 'ERROR', status = 400) {
   return res.status(status).json({ success: false, message, code });
 }
 
 /* ============================================================================
- * SECTION 3 — M-PESA SMS EXTRACTOR
- * ============================================================================
- *
- * Parses pasted text (typically one or more M-Pesa confirmation SMS
- * messages) and extracts:
- *   - The 10-character confirmation code
- *   - The sender's phone number (from the surrounding context)
- *   - The amount (KSH) if present
- *
- * We deliberately avoid hardcoding a single SMS format because Safaricom
- * has several message templates. Instead, we look for:
- *   - Any 10-character alphanumeric token that appears either near the
- *     word "Confirmed" (within ±80 chars) OR at a line boundary.
- *   - The first Kenyan phone number in the surrounding ±180/±260 char
- *     window, excluding the payment destination phone (Pochi).
- *   - The first "Ksh<amount>" match in the same window.
- * ========================================================================== */
-
-// Regex: 10-character uppercase alphanumeric token bounded by word
-// boundaries. Global flag so we can iterate.
-const MPESA_CODE_RE = /\b([A-Z0-9]{10})\b/g;
-
-// Regex: Kenyan phone in the common formats (2547…, 2541…, 07…, 01…).
-// Captures the 9 digits after the country code / leading zero.
-const MPESA_PHONE_RE = /(?:\+?254|0)([17]\d{8})/g;
-
-// Regex: "Ksh" followed by a number, optionally with thousands commas.
-const MPESA_AMOUNT_RE = /Ksh\s*([\d,]+(?:\.\d{1,2})?)/i;
-
-// Regex: the word "Confirmed" — the marker Safaricom uses in
-// successful-transaction SMS messages.
-const MPESA_CONFIRMED_RE = /Confirmed/i;
-
-/**
- * Extract M-Pesa entries from a block of pasted text.
- *
- * @param {string} rawText - The pasted SMS content.
- * @param {object} [options]
- * @param {string[]} [options.excludePhones=[]] - Phone numbers to exclude
- *   from sender detection (typically the payment destination).
- * @returns {Array<{code: string, senderPhone: string|null, amount: number|null, raw: string}>}
- */
-function extractMpesaEntries(rawText, options = {}) {
-  const { excludePhones = [] } = options;
-
-  // Build a set of excluded phone numbers in local 07/01 format.
-  const excludeSet = new Set(
-    excludePhones.map((p) => {
-      const s = String(p || '').replace(/[\s\-().]/g, '');
-      if (/^0[17]\d{8}$/.test(s)) return s;
-      if (/^254[17]\d{8}$/.test(s)) return '0' + s.slice(3);
-      if (/^\+254[17]\d{8}$/.test(s)) return '0' + s.slice(4);
-      return s;
-    })
-  );
-
-  const entries = [];
-  if (!rawText) return entries;
-
-  // Normalize line endings so boundary detection is consistent.
-  const text = String(rawText).replace(/\r\n?/g, '\n');
-
-  // First pass: locate every 10-char alphanumeric token.
-  const codePositions = [];
-  let m;
-  MPESA_CODE_RE.lastIndex = 0;
-  while ((m = MPESA_CODE_RE.exec(text)) !== null) {
-    codePositions.push({ code: m[1], index: m.index });
-  }
-
-  // Second pass: for each unique code, decide whether it looks like an
-  // actual M-Pesa code and extract context.
-  const seen = new Set();
-  for (const cp of codePositions) {
-    if (seen.has(cp.code)) continue;
-    seen.add(cp.code);
-
-    // Look for the word "Confirmed" within ±80 chars after the code.
-    const afterSlice = text.slice(cp.index + 10, cp.index + 80);
-    const beforeSlice = text.slice(Math.max(0, cp.index - 25), cp.index);
-    const hasConfirmed =
-      MPESA_CONFIRMED_RE.test(afterSlice) || MPESA_CONFIRMED_RE.test(beforeSlice);
-
-    // Or the code sits at a line boundary (typical of SMS screenshots
-    // pasted into a textarea).
-    const prevChar = cp.index > 0 ? text[cp.index - 1] : '\n';
-    const atBoundary =
-      prevChar === '\n' || prevChar === ' ' || prevChar === '\t' || cp.index === 0;
-
-    if (!hasConfirmed && !atBoundary) continue;
-
-    // Context window: up to 180 chars before and 260 chars after the code.
-    const ctxStart = Math.max(0, cp.index - 180);
-    const ctxEnd = Math.min(text.length, cp.index + 10 + 260);
-    const context = text.slice(ctxStart, ctxEnd);
-
-    // Extract phone numbers from the context, excluding the payment phone.
-    const phones = [];
-    let pm;
-    MPESA_PHONE_RE.lastIndex = 0;
-    while ((pm = MPESA_PHONE_RE.exec(context)) !== null) {
-      const p = '0' + pm[1];
-      if (!excludeSet.has(p)) phones.push(p);
-    }
-
-    // Extract the amount if present.
-    let amount = null;
-    const am = context.match(MPESA_AMOUNT_RE);
-    if (am) amount = parseFloat(am[1].replace(/,/g, ''));
-
-    entries.push({
-      code: cp.code,
-      senderPhone: phones.length ? phones[0] : null,
-      amount,
-      raw: context.replace(/\s+/g, ' ').trim().slice(0, 320),
-    });
-  }
-
-  return entries;
-}
-
-/* ============================================================================
- * SECTION 4 — DATABASE CONNECTION
- * ============================================================================
- *
- * Responsibilities:
- *   - Configure Mongoose globally (strictQuery, buffering).
- *   - Connect with retry + exponential backoff (5 attempts).
- *   - Detect replica-set support (for future transaction usage).
- *   - Synchronize indexes for every registered model.
- *   - Provide a graceful disconnect for shutdown.
+ * SECTION 3 — DATABASE CONNECTION
  * ========================================================================== */
 
 mongoose.set('strictQuery', true);
 mongoose.set('bufferCommands', false);
 
-/** Set to true if the connected MongoDB is a replica set (Atlas is). */
 let supportsTransactions = false;
 
-/** Options passed to mongoose.connect(). */
 const CONNECT_OPTIONS = {
   maxPoolSize: IS_PROD ? 20 : 10,
   serverSelectionTimeoutMS: 15000,
@@ -1055,17 +434,11 @@ const CONNECT_OPTIONS = {
   connectTimeoutMS: 15000,
   heartbeatFrequencyMS: 10000,
   retryWrites: true,
-  appName: 'physics-education-groups',
+  appName: 'itb9301-internet-computing',
 };
 
-/** Promise-based sleep. */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Connect to MongoDB with retry and exponential backoff.
- * @param {number} [attempt=1]
- * @returns {Promise<boolean>}
- */
 async function connectWithRetry(attempt = 1) {
   const MAX = 5;
   try {
@@ -1082,10 +455,6 @@ async function connectWithRetry(attempt = 1) {
   }
 }
 
-/**
- * Probe the connected MongoDB to determine whether it is a replica set.
- * @returns {Promise<boolean>}
- */
 async function detectTransactionSupport() {
   try {
     const admin = mongoose.connection.db.admin();
@@ -1097,10 +466,6 @@ async function detectTransactionSupport() {
   }
 }
 
-/**
- * Connect to the database and synchronize indexes. Idempotent.
- * @returns {Promise<import('mongoose').Connection>}
- */
 async function connectDatabase() {
   if (mongoose.connection.readyState === 1) return mongoose.connection;
 
@@ -1113,7 +478,6 @@ async function connectDatabase() {
   supportsTransactions = await detectTransactionSupport();
   console.log(`[db] Transactions: ${supportsTransactions ? 'ENABLED' : 'DISABLED'}`);
 
-  // Build any missing indexes. Safe on every boot.
   for (const name of mongoose.modelNames()) {
     try {
       await mongoose.model(name).syncIndexes();
@@ -1126,9 +490,6 @@ async function connectDatabase() {
   return mongoose.connection;
 }
 
-/**
- * Close the MongoDB connection gracefully.
- */
 async function disconnectDatabase() {
   try {
     if (mongoose.connection.readyState !== 0) {
@@ -1141,17 +502,7 @@ async function disconnectDatabase() {
 }
 
 /* ============================================================================
- * SECTION 5 — MONGOOSE MODELS
- * ============================================================================
- *
- * Collections:
- *   - groups           : Each group's name, normalized name, leader, count.
- *   - members          : Each student's identity + payment + device info.
- *   - admins           : The administrator record (password hashed).
- *   - adminsessions    : Session tokens (admin + member) with TTL.
- *   - settings         : Key/value store for runtime settings.
- *
- * Indexes are declared explicitly so they are documented in one place.
+ * SECTION 4 — MONGOOSE MODELS
  * ========================================================================== */
 
 // ----------------------------------------------------------------------------
@@ -1160,21 +511,12 @@ async function disconnectDatabase() {
 
 const GroupSchema = new mongoose.Schema(
   {
-    /**
-     * Display name. Preserves the user's original casing and spacing.
-     * Required. Max 80 characters.
-     */
     name: {
       type: String,
       required: [true, 'Group name is required.'],
       trim: true,
       maxlength: [80, 'Group name too long.'],
     },
-
-    /**
-     * Normalized (lowercase, whitespace-collapsed) name used for matching.
-     * Unique — prevents duplicates like "Group A" and "group  a".
-     */
     normalizedName: {
       type: String,
       required: true,
@@ -1183,22 +525,11 @@ const GroupSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
-
-    /**
-     * Reference to the current group leader (a Member document).
-     * Null until the first member joins.
-     */
     leader: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Member',
       default: null,
     },
-
-    /**
-     * Denormalized member count. Kept in sync with the members collection.
-     * The real cap is enforced atomically at registration time using the
-     * current value of Settings.max_group_members.
-     */
     memberCount: {
       type: Number,
       default: 0,
@@ -1256,10 +587,6 @@ const DeviceMetadataSchema = new mongoose.Schema(
 
 const MemberSchema = new mongoose.Schema(
   {
-    /**
-     * Unique registration number across the entire system.
-     * Always stored uppercase. Unique index.
-     */
     regNo: {
       type: String,
       required: [true, 'Registration number is required.'],
@@ -1270,8 +597,6 @@ const MemberSchema = new mongoose.Schema(
       minlength: [3, 'Registration number too short.'],
       maxlength: [40, 'Registration number too long.'],
     },
-
-    /** Full name (2–120 chars). */
     name: {
       type: String,
       required: [true, 'Full name is required.'],
@@ -1279,108 +604,42 @@ const MemberSchema = new mongoose.Schema(
       minlength: [2, 'Full name too short.'],
       maxlength: [120, 'Full name too long.'],
     },
-
-    /** Phone number in E.164 form (e.g. +254712345678). */
     phone: {
       type: String,
       required: [true, 'Phone number is required.'],
       trim: true,
       maxlength: [20, 'Phone number too long.'],
     },
-
-    /** Reference to the Group this member belongs to. */
     group: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Group',
       required: true,
       index: true,
     },
-
-    /** True for exactly one member per group (the leader). */
     isLeader: {
       type: Boolean,
       default: false,
       index: true,
     },
-
-    /**
-     * Browser-generated fingerprint. Unique sparse index prevents a
-     * single browser from submitting more than one registration.
-     */
     deviceId: {
       type: String,
       default: null,
       trim: true,
       maxlength: 128,
     },
-
-    /** Non-sensitive device metadata. */
     deviceMetadata: {
       type: DeviceMetadataSchema,
       default: () => ({}),
     },
-
-    /** Optional HMAC-SHA256 of the client IP. Never a raw IP. */
     ipHash: {
       type: String,
       default: null,
       select: false,
     },
-
-    // -------- Lab Manual Payment fields (all optional) --------
-
-    /** M-Pesa confirmation code (10 chars, uppercase). */
-    mpesaCode: {
-      type: String,
-      default: null,
-      trim: true,
-      uppercase: true,
-      maxlength: 20,
-    },
-
-    /** Amount paid (KSH). */
-    paymentAmount: {
-      type: Number,
-      default: null,
-      min: 0,
-    },
-
-    /** Free-text note (time & day the student paid). */
-    paymentNote: {
-      type: String,
-      default: null,
-      trim: true,
-      maxlength: 200,
-    },
-
-    /** When the student submitted the code. */
-    paymentSubmittedAt: {
-      type: Date,
-      default: null,
-    },
-
-    /**
-     * Admin-managed verification state:
-     *   null      — no code submitted (payment not required)
-     *   'pending' — code submitted, awaiting admin check
-     *   'verified' — admin confirmed on their M-Pesa statement
-     *   'rejected' — admin rejected the code
-     */
-    paymentStatus: {
-      type: String,
-      enum: ['pending', 'verified', 'rejected', null],
-      default: null,
-      index: true,
-    },
-
-    paymentVerifiedAt: { type: Date, default: null },
-    paymentVerifiedBy: { type: String, default: null, maxlength: 500 },
-    paymentRejectedReason: { type: String, default: null, maxlength: 200 },
   },
   { timestamps: true, versionKey: false }
 );
 
-// Unique sparse index on deviceId — only enforced for non-null string IDs.
 MemberSchema.index(
   { deviceId: 1 },
   {
@@ -1391,20 +650,8 @@ MemberSchema.index(
   }
 );
 
-// Compound index for listing a group's members in order.
 MemberSchema.index({ group: 1, createdAt: 1 });
 MemberSchema.index({ group: 1, isLeader: -1, createdAt: 1 });
-
-// Unique sparse index on mpesaCode — only enforced for non-null strings.
-// Prevents two students from submitting the same code.
-MemberSchema.index(
-  { mpesaCode: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { mpesaCode: { $type: 'string' } },
-    name: 'uniq_mpesaCode_when_set',
-  }
-);
 
 const Member = mongoose.model('Member', MemberSchema);
 
@@ -1424,13 +671,8 @@ const AdminSchema = new mongoose.Schema(
       minlength: 3,
       maxlength: 60,
     },
-
-    /** scrypt hash (hex, 64 bytes). */
     passwordHash: { type: String, required: true, select: false },
-
-    /** Random hex salt for the hash. */
     passwordSalt: { type: String, required: true, select: false },
-
     lastLoginAt: { type: Date, default: null },
     loginCount: { type: Number, default: 0, min: 0 },
   },
@@ -1445,7 +687,6 @@ const Admin = mongoose.model('Admin', AdminSchema);
 
 const AdminSessionSchema = new mongoose.Schema(
   {
-    /** 96-char random hex token. Unique index. */
     token: {
       type: String,
       required: true,
@@ -1454,25 +695,15 @@ const AdminSessionSchema = new mongoose.Schema(
       minlength: 32,
       maxlength: 200,
     },
-
-    /** Session kind: 'admin' or 'member'. */
     role: {
       type: String,
       required: true,
       enum: ['admin', 'member'],
       index: true,
     },
-
-    /** Member ID when role === 'member'; null otherwise. */
     subjectId: { type: mongoose.Schema.Types.ObjectId, default: null },
-
-    /** Group ID when role === 'member'; null otherwise. */
     group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', default: null },
-
-    /** Truncated UA for diagnostics. */
     userAgent: { type: String, default: '', maxlength: 300 },
-
-    /** TTL index — MongoDB deletes expired sessions automatically. */
     expiresAt: {
       type: Date,
       required: true,
@@ -1499,19 +730,9 @@ const SettingsSchema = new mongoose.Schema(
 const Settings = mongoose.model('Settings', SettingsSchema);
 
 /* ============================================================================
- * SECTION 6 — SETTINGS & BUSINESS HELPERS
- * ============================================================================
- *
- * Thin wrappers around the Settings collection and shared business logic
- * (leader reconciliation, member count recalculation, response shaping).
+ * SECTION 5 — SETTINGS & BUSINESS HELPERS
  * ========================================================================== */
 
-/**
- * Read a setting by key, returning the default when not set.
- * @param {string} key
- * @param {any} [defaultValue=null]
- * @returns {Promise<any>}
- */
 async function getSetting(key, defaultValue = null) {
   try {
     const doc = await Settings.findOne({ key }).lean();
@@ -1521,12 +742,6 @@ async function getSetting(key, defaultValue = null) {
   }
 }
 
-/**
- * Upsert a setting.
- * @param {string} key
- * @param {any} value
- * @returns {Promise<any>}
- */
 async function setSetting(key, value) {
   const doc = await Settings.findOneAndUpdate(
     { key },
@@ -1536,49 +751,11 @@ async function setSetting(key, value) {
   return doc ? doc.value : value;
 }
 
-/**
- * Is registration currently open?
- * @returns {Promise<boolean>}
- */
 async function isRegistrationOpen() {
   const v = await getSetting('registration_open', true);
   return v !== false;
 }
 
-/**
- * Is M-Pesa payment proof required on registration?
- * @returns {Promise<boolean>}
- */
-async function isPaymentProofRequired() {
-  const v = await getSetting('require_payment_proof', false);
-  return v === true;
-}
-
-/**
- * The configured lab-manual fee (KSH).
- * @returns {Promise<number>}
- */
-async function getPaymentAmount() {
-  const v = await getSetting('payment_amount', 45);
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : 45;
-}
-
-/**
- * The configured Pochi phone (display form, e.g. 0741742291).
- * @returns {Promise<string>}
- */
-async function getPaymentPhone() {
-  const v = await getSetting('payment_phone', '0741742291');
-  const s = String(v || '').trim();
-  return s || '0741742291';
-}
-
-/**
- * The configured max members per group.
- * Clamped between 1 and MAX_GROUP_MEMBERS_HARD_LIMIT.
- * @returns {Promise<number>}
- */
 async function getMaxGroupMembers() {
   const v = await getSetting('max_group_members', CONFIG.MAX_GROUP_MEMBERS_DEFAULT);
   const n = Number(v);
@@ -1586,20 +763,12 @@ async function getMaxGroupMembers() {
   return Math.max(1, Math.min(CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT, Math.floor(n)));
 }
 
-/**
- * Ensure a group has exactly one leader if it has any members.
- * - Promotes the earliest member when no leader exists.
- * - Demotes any other member flagged isLeader.
- * @param {string|import('mongoose').Types.ObjectId} groupId
- * @returns {Promise<object|null>}
- */
 async function reconcileGroupLeader(groupId) {
   const group = await Group.findById(groupId);
   if (!group) return null;
 
   const members = await Member.find({ group: groupId }).sort({ createdAt: 1, _id: 1 });
 
-  // Empty group: leader should be null.
   if (members.length === 0) {
     if (group.leader) {
       group.leader = null;
@@ -1608,8 +777,6 @@ async function reconcileGroupLeader(groupId) {
     return group;
   }
 
-  // Determine the leader. If the stored leader is no longer a member,
-  // promote the earliest remaining member.
   let leaderId = group.leader;
   const leaderStillPresent = leaderId && members.some((m) => String(m._id) === String(leaderId));
   if (!leaderStillPresent) {
@@ -1618,7 +785,6 @@ async function reconcileGroupLeader(groupId) {
     await group.save();
   }
 
-  // Flip isLeader flags so exactly one member has isLeader: true.
   const leaderMember = members.find((m) => String(m._id) === String(leaderId));
   if (leaderMember && !leaderMember.isLeader) {
     await Member.updateOne({ _id: leaderMember._id }, { $set: { isLeader: true } });
@@ -1631,23 +797,12 @@ async function reconcileGroupLeader(groupId) {
   return group;
 }
 
-/**
- * Recompute a group's memberCount from the members collection.
- * @param {string|import('mongoose').Types.ObjectId} groupId
- * @returns {Promise<number>}
- */
 async function recalcMemberCount(groupId) {
   const count = await Member.countDocuments({ group: groupId });
   await Group.updateOne({ _id: groupId }, { $set: { memberCount: count } });
   return count;
 }
 
-/**
- * Shape a Group document into the JSON returned to clients.
- * @param {object} group
- * @param {object} [extra={}]
- * @returns {object}
- */
 function shapeGroup(group, extra = {}) {
   return {
     id: String(group._id),
@@ -1662,15 +817,8 @@ function shapeGroup(group, extra = {}) {
   };
 }
 
-/**
- * Shape a Member document into the JSON returned to clients.
- * @param {object} member
- * @param {object} [opts]
- * @param {boolean} [opts.includePayment=false] - Include payment fields.
- * @returns {object}
- */
-function shapeMember(member, opts = {}) {
-  const base = {
+function shapeMember(member) {
+  return {
     id: String(member._id),
     regNo: member.regNo,
     name: member.name,
@@ -1681,40 +829,14 @@ function shapeMember(member, opts = {}) {
     createdAt: member.createdAt,
     updatedAt: member.updatedAt,
   };
-
-  if (opts.includePayment) {
-    base.mpesaCode = member.mpesaCode || null;
-    base.paymentAmount = member.paymentAmount != null ? member.paymentAmount : null;
-    base.paymentNote = member.paymentNote || null;
-    base.paymentSubmittedAt = member.paymentSubmittedAt || null;
-    base.paymentStatus = member.paymentStatus || null;
-    base.paymentVerifiedAt = member.paymentVerifiedAt || null;
-    base.paymentRejectedReason = member.paymentRejectedReason || null;
-  }
-
-  return base;
 }
 
 /* ============================================================================
- * SECTION 7 — SERVER-SENT EVENTS (SSE)
- * ============================================================================
- *
- * Admin dashboard subscribes to /api/admin/events. Whenever a
- * registration, member change, group change, or settings change occurs,
- * we broadcast an SSE event to every connected admin browser.
- *
- * We also send a heartbeat comment every 25 seconds to keep proxies and
- * Render's load balancer from closing the connection.
+ * SECTION 6 — SERVER-SENT EVENTS (SSE)
  * ========================================================================== */
 
-/** Set of active SSE response objects. */
 const sseClients = new Set();
 
-/**
- * Broadcast an event to every connected SSE client.
- * @param {string} event
- * @param {any} data
- */
 function sseBroadcast(event, data) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of sseClients) {
@@ -1726,8 +848,6 @@ function sseBroadcast(event, data) {
   }
 }
 
-// Heartbeat every 25 seconds. `.unref()` so the timer doesn't keep the
-// process alive during graceful shutdown.
 setInterval(() => {
   for (const res of sseClients) {
     try {
@@ -1739,28 +859,13 @@ setInterval(() => {
 }, 25000).unref();
 
 /* ============================================================================
- * SECTION 8 — EXPRESS APP & MIDDLEWARE
- * ============================================================================
- *
- * The order of `app.use()` calls matters:
- *   1. trust proxy  — required on Render for HTTPS detection.
- *   2. helmet       — sets security headers.
- *   3. cors         — handles cross-origin requests.
- *   4. body parsers — JSON and form-urlencoded.
- *   5. cookieParser — needed for session cookies.
- *   6. rate limit   — /api/* only.
- *   7. CSRF         — /api/* non-GET only.
- *   8. auth         — attached per-route.
+ * SECTION 7 — EXPRESS APP & MIDDLEWARE
  * ========================================================================== */
 
 const app = express();
 
-// Required on Render, which terminates TLS in front of the app.
 app.set('trust proxy', 1);
 
-// ----------------------------------------------------------------------------
-// Helmet — security headers
-// ----------------------------------------------------------------------------
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -1768,7 +873,7 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"], // inline <style> allowed
+        styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
         fontSrc: ["'self'", 'data:'],
@@ -1776,7 +881,6 @@ app.use(
         baseUri: ["'self'"],
         formAction: ["'self'"],
         frameAncestors: ["'none'"],
-        // Only enforce HTTPS upgrades in production.
         upgradeInsecureRequests: IS_PROD ? [] : null,
       },
     },
@@ -1788,15 +892,10 @@ app.use(
   })
 );
 
-// ----------------------------------------------------------------------------
-// CORS
-// ----------------------------------------------------------------------------
 app.use(
   cors({
     origin(origin, cb) {
-      // Same-origin requests have no Origin header; allow them.
       if (!origin) return cb(null, true);
-      // Empty allow-list means same-origin only.
       if (CORS_ORIGIN.length === 0) return cb(null, false);
       return cb(null, CORS_ORIGIN.includes(origin));
     },
@@ -1804,18 +903,10 @@ app.use(
   })
 );
 
-// ----------------------------------------------------------------------------
-// Body parsing
-// ----------------------------------------------------------------------------
 app.use(express.json({ limit: '256kb' }));
 app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 app.use(cookieParser());
 
-// ----------------------------------------------------------------------------
-// Rate limiters
-// ----------------------------------------------------------------------------
-
-/** General limiter applied to every /api/* route. */
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 400,
@@ -1824,7 +915,6 @@ const generalLimiter = rateLimit({
   message: { success: false, message: 'Too many requests. Please slow down.', code: 'RATE_LIMIT' },
 });
 
-/** Tighter limiter for the register endpoint. */
 const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 25,
@@ -1833,7 +923,6 @@ const registerLimiter = rateLimit({
   message: { success: false, message: 'Too many registration attempts. Try again later.', code: 'RATE_LIMIT' },
 });
 
-/** Tighter limiter for login endpoints. */
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 25,
@@ -1844,19 +933,6 @@ const loginLimiter = rateLimit({
 
 app.use('/api/', generalLimiter);
 
-// ----------------------------------------------------------------------------
-// CSRF — double-submit cookie
-// ----------------------------------------------------------------------------
-//
-// GET/HEAD/OPTIONS are exempt. Mutating methods must echo the CSRF token
-// from the peg_csrf cookie in the X-CSRF-Token header.
-
-/**
- * CSRF middleware.
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {Function} next
- */
 function requireCsrf(req, res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
 
@@ -1871,15 +947,6 @@ function requireCsrf(req, res, next) {
 
 app.use('/api/', requireCsrf);
 
-// ----------------------------------------------------------------------------
-// Cookie helper
-// ----------------------------------------------------------------------------
-
-/**
- * Build cookie options with a given max-age.
- * @param {number} maxAgeMs
- * @returns {object}
- */
 const cookieOpts = (maxAgeMs) => ({
   httpOnly: true,
   secure: CONFIG.COOKIE_SECURE,
@@ -1888,18 +955,6 @@ const cookieOpts = (maxAgeMs) => ({
   path: '/',
 });
 
-// ----------------------------------------------------------------------------
-// Session attach + auth middlewares
-// ----------------------------------------------------------------------------
-
-/**
- * Load a session from a cookie and attach it to req._session.
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {Function} next
- * @param {string} cookieName
- * @param {'admin'|'member'} role
- */
 async function attachSession(req, res, next, cookieName, role) {
   try {
     const token = req.cookies ? req.cookies[cookieName] : null;
@@ -1919,7 +974,6 @@ async function attachSession(req, res, next, cookieName, role) {
   }
 }
 
-/** Require a valid admin session. */
 function requireAdmin(req, res, next) {
   attachSession(
     req,
@@ -1935,7 +989,6 @@ function requireAdmin(req, res, next) {
   );
 }
 
-/** Require a valid member session. */
 function requireMember(req, res, next) {
   attachSession(
     req,
@@ -1952,20 +1005,9 @@ function requireMember(req, res, next) {
 }
 
 /* ============================================================================
- * SECTION 9 — PUBLIC ROUTES
- * ============================================================================
- *
- * - /api/health              : liveness probe
- * - /api/csrf-token          : issue a CSRF token
- * - /api/registration-status : is registration open?
- * - /api/payment-config      : public payment + capacity config
- * - /api/register            : student registration
+ * SECTION 8 — PUBLIC ROUTES
  * ========================================================================== */
 
-/**
- * Liveness probe.
- * Returns app status, uptime, DB state, and version.
- */
 app.get('/api/health', (req, res) => {
   const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
   return ok(res, {
@@ -1973,15 +1015,10 @@ app.get('/api/health', (req, res) => {
     uptime: Math.floor(process.uptime()),
     db: states[mongoose.connection.readyState] || 'unknown',
     transactions: supportsTransactions,
-    version: '1.5.0',
+    version: '2.0.0',
   });
 });
 
-/**
- * Issue a fresh CSRF token.
- * The token is set as a readable cookie and also returned in the body.
- * The client echoes it in the X-CSRF-Token header on mutating requests.
- */
 app.get('/api/csrf-token', (req, res) => {
   const token = crypto.randomBytes(24).toString('hex');
   res.cookie(CONFIG.CSRF_COOKIE, token, {
@@ -1994,9 +1031,6 @@ app.get('/api/csrf-token', (req, res) => {
   return ok(res, { token });
 });
 
-/**
- * Public: is registration currently open?
- */
 app.get(
   '/api/registration-status',
   asyncHandler(async (req, res) => {
@@ -2006,26 +1040,19 @@ app.get(
 );
 
 /**
- * Public: exposes payment + capacity configuration to the register page.
- * The register page uses requirePaymentProof to decide whether to
- * reveal the M-Pesa code and payment note fields.
+ * Public: exposes registration + capacity configuration to the register page.
+ * URL kept as /api/payment-config for frontend compatibility; returns only
+ * registration_open and max_group_members now that payments are removed.
  */
 app.get(
   '/api/payment-config',
   asyncHandler(async (req, res) => {
-    const [registrationOpen, requirePaymentProof, paymentAmount, paymentPhone, maxGroupMembers] =
-      await Promise.all([
-        isRegistrationOpen(),
-        isPaymentProofRequired(),
-        getPaymentAmount(),
-        getPaymentPhone(),
-        getMaxGroupMembers(),
-      ]);
+    const [registrationOpen, maxGroupMembers] = await Promise.all([
+      isRegistrationOpen(),
+      getMaxGroupMembers(),
+    ]);
     return ok(res, {
       registrationOpen,
-      requirePaymentProof,
-      paymentAmount,
-      paymentPhone,
       maxGroupMembers,
     });
   })
@@ -2041,28 +1068,16 @@ app.get(
  *   groupName      — required
  *   deviceId       — required
  *   deviceMetadata — required (object)
- *   mpesaCode      — required only if payment proof is ON
- *   paymentNote    — required only if payment proof is ON
  *
- * Response 201 on success with member + group + payment info.
+ * Response 201 on success with member + group info.
  * Every error uses the standard { success: false, message, code } shape.
  */
 app.post(
   '/api/register',
   registerLimiter,
   asyncHandler(async (req, res) => {
-    // -------- Read current settings --------
-    const [
-      registrationOpen,
-      requirePaymentProof,
-      paymentAmount,
-      paymentPhone,
-      maxGroupMembers,
-    ] = await Promise.all([
+    const [registrationOpen, maxGroupMembers] = await Promise.all([
       isRegistrationOpen(),
-      isPaymentProofRequired(),
-      getPaymentAmount(),
-      getPaymentPhone(),
       getMaxGroupMembers(),
     ]);
 
@@ -2075,7 +1090,6 @@ app.post(
       );
     }
 
-    // -------- Parse + normalize input --------
     const body = req.body || {};
     const regNo = normalizeRegNo(body.regNo);
     const name = normalizeName(body.name);
@@ -2084,10 +1098,7 @@ app.post(
     const groupNorm = normalizeGroupName(body.groupName);
     const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
     const deviceMetadata = sanitizeDeviceMetadata(body.deviceMetadata);
-    const mpesaCode = normalizeMpesaCode(body.mpesaCode);
-    const paymentNote = sanitizePaymentNote(body.paymentNote);
 
-    // -------- Field validation --------
     if (!isValidRegNo(regNo)) return fail(res, 'Please provide a valid registration number.', 'INVALID_REQNO', 400);
     if (!isValidName(name)) return fail(res, 'Please provide a valid full name.', 'INVALID_NAME', 400);
 
@@ -2097,35 +1108,6 @@ app.post(
     if (!isValidGroupName(groupNorm)) return fail(res, 'Please provide a valid group name.', 'INVALID_GROUP', 400);
     if (!isValidDeviceId(deviceId)) return fail(res, 'Unable to identify this device. Please refresh and try again.', 'INVALID_DEVICE', 400);
 
-    // -------- Payment proof (only when enabled) --------
-    if (requirePaymentProof) {
-      if (!mpesaCode) {
-        return fail(
-          res,
-          `Payment proof is required. Please send KSH ${paymentAmount} to ${paymentPhone} and paste the 10-character M-Pesa confirmation code.`,
-          'PAYMENT_REQUIRED',
-          400
-        );
-      }
-      const codeCheck = validateMpesaCodeHard(mpesaCode);
-      if (!codeCheck.valid) {
-        return fail(res, codeCheck.reason, 'INVALID_MPESA_CODE', 400);
-      }
-      if (!paymentNote) {
-        return fail(res, 'Please note down the time and day you paid in the payment note field.', 'PAYMENT_NOTE_REQUIRED', 400);
-      }
-      const existingCode = await Member.findOne({ mpesaCode }).lean();
-      if (existingCode) {
-        return fail(
-          res,
-          'This M-Pesa code has already been submitted by another member. Each code can only be used once.',
-          'DUPLICATE_MPESA_CODE',
-          409
-        );
-      }
-    }
-
-    // -------- Duplicate REG number --------
     const existingReg = await Member.findOne({ regNo }).lean();
     if (existingReg) {
       console.log(`[register] rejected duplicate regNo=${regNo}`);
@@ -2137,7 +1119,6 @@ app.post(
       );
     }
 
-    // -------- Device lock --------
     if (ENFORCE_DEVICE_LOCK) {
       const existingDevice = await Member.findOne({ deviceId }).lean();
       if (existingDevice) {
@@ -2151,7 +1132,6 @@ app.post(
       }
     }
 
-    // -------- Find or create the group (case/whitespace normalized) --------
     let group = await Group.findOne({ normalizedName: groupNorm });
     let isNewGroup = false;
 
@@ -2165,7 +1145,6 @@ app.post(
         isNewGroup = true;
         console.log(`[register] created group "${groupDisplay}"`);
       } catch (err) {
-        // Another concurrent request may have created it first.
         if (err && err.code === 11000) {
           group = await Group.findOne({ normalizedName: groupNorm });
         } else {
@@ -2178,11 +1157,6 @@ app.post(
       return fail(res, 'We could not complete your registration. Please contact the Administrator.', 'GROUP_CREATE_FAILED', 500);
     }
 
-    // -------- Atomic capacity increment --------
-    // This is the final authority on group size. `$lt: maxGroupMembers`
-    // means the update only matches if the current count is below the cap.
-    // MongoDB guarantees per-document atomicity, so two simultaneous
-    // registrations cannot both succeed for the last slot.
     const incremented = await Group.findOneAndUpdate(
       { _id: group._id, memberCount: { $lt: maxGroupMembers } },
       { $inc: { memberCount: 1 } },
@@ -2199,10 +1173,8 @@ app.post(
       );
     }
 
-    // First member of a group becomes the leader.
     const isLeader = incremented.memberCount === 1;
 
-    // -------- Create the member (roll back capacity on failure) --------
     let member;
     try {
       member = await Member.create({
@@ -2214,14 +1186,8 @@ app.post(
         deviceId: deviceId || null,
         deviceMetadata,
         ipHash: STORE_IP_HASH ? hashIp(req.ip) : null,
-        mpesaCode: mpesaCode || null,
-        paymentAmount: mpesaCode ? paymentAmount : null,
-        paymentNote: paymentNote || null,
-        paymentSubmittedAt: mpesaCode ? new Date() : null,
-        paymentStatus: mpesaCode ? 'pending' : null,
       });
     } catch (err) {
-      // Undo the capacity increment.
       await Group.updateOne({ _id: group._id }, { $inc: { memberCount: -1 } });
 
       if (err && err.code === 11000) {
@@ -2232,34 +1198,28 @@ app.post(
         if (keys.deviceId) {
           return fail(res, 'This device has already been used to submit registration details. If you believe this is an error, please contact the Administrator.', 'DEVICE_USED', 409);
         }
-        if (keys.mpesaCode) {
-          return fail(res, 'This M-Pesa code has already been submitted by another member. Each code can only be used once.', 'DUPLICATE_MPESA_CODE', 409);
-        }
       }
       throw err;
     }
 
-    // -------- Leader assignment --------
     if (isLeader) {
       await Group.updateOne({ _id: group._id, leader: null }, { $set: { leader: member._id } });
       await reconcileGroupLeader(group._id);
       console.log(`[register] leader assigned: ${regNo} → ${group.normalizedName}`);
     }
 
-    // -------- Recompute count defensively --------
     const freshCount = await recalcMemberCount(group._id);
     const finalGroup = await Group.findById(group._id);
 
-    // -------- Notify admins --------
     sseBroadcast('registration', {
-      member: shapeMember(member, { includePayment: true }),
+      member: shapeMember(member),
       group: shapeGroup(finalGroup, { capacity: maxGroupMembers }),
       isNewGroup,
       isLeader,
     });
 
     console.log(
-      `[register] success regNo=${regNo} group=${group.normalizedName} leader=${isLeader} paid=${Boolean(mpesaCode)}`
+      `[register] success regNo=${regNo} group=${group.normalizedName} leader=${isLeader}`
     );
 
     const message = isLeader
@@ -2272,17 +1232,8 @@ app.post(
         message,
         isLeader,
         isNewGroup,
-        member: shapeMember(member, { includePayment: true }),
+        member: shapeMember(member),
         group: shapeGroup(finalGroup, { capacity: maxGroupMembers, memberCount: freshCount }),
-        payment: {
-          requirePaymentProof,
-          paymentAmount,
-          paymentPhone,
-          mpesaCode: member.mpesaCode || null,
-          paymentNote: member.paymentNote || null,
-          paymentSubmittedAt: member.paymentSubmittedAt || null,
-          paymentStatus: member.paymentStatus || null,
-        },
       },
       201
     );
@@ -2290,13 +1241,7 @@ app.post(
 );
 
 /* ============================================================================
- * SECTION 10 — MEMBER ROUTES
- * ============================================================================
- *
- * - POST /api/member/login   : group name + reg no → session cookie
- * - POST /api/member/logout  : clears session
- * - GET  /api/member/me      : current member profile
- * - GET  /api/member/group   : member's own group + all its members
+ * SECTION 9 — MEMBER ROUTES
  * ========================================================================== */
 
 app.post(
@@ -2338,7 +1283,7 @@ app.post(
 
     return ok(res, {
       message: 'Login successful.',
-      member: shapeMember(member, { includePayment: true }),
+      member: shapeMember(member),
       group: shapeGroup(group, { capacity: maxGroupMembers }),
     });
   })
@@ -2365,7 +1310,7 @@ app.get(
     const maxGroupMembers = await getMaxGroupMembers();
 
     return ok(res, {
-      member: shapeMember(member, { includePayment: true }),
+      member: shapeMember(member),
       group: group ? shapeGroup(group, { capacity: maxGroupMembers }) : null,
     });
   })
@@ -2381,17 +1326,13 @@ app.get(
     const group = await Group.findById(member.group);
     if (!group) return fail(res, 'Group not found.', 'NOT_FOUND', 404);
 
-    const [members, maxGroupMembers, requirePaymentProof, paymentAmount, paymentPhone] =
-      await Promise.all([
-        Member.find({ group: group._id })
-          .sort({ isLeader: -1, createdAt: 1 })
-          .select('regNo name phone isLeader group createdAt')
-          .lean(),
-        getMaxGroupMembers(),
-        isPaymentProofRequired(),
-        getPaymentAmount(),
-        getPaymentPhone(),
-      ]);
+    const [members, maxGroupMembers] = await Promise.all([
+      Member.find({ group: group._id })
+        .sort({ isLeader: -1, createdAt: 1 })
+        .select('regNo name phone isLeader group createdAt')
+        .lean(),
+      getMaxGroupMembers(),
+    ]);
 
     const leader = members.find((m) => m.isLeader) || null;
 
@@ -2414,42 +1355,13 @@ app.get(
         regNo: member.regNo,
         name: member.name,
         isLeader: member.isLeader,
-        mpesaCode: member.mpesaCode || null,
-        paymentNote: member.paymentNote || null,
-        paymentAmount: member.paymentAmount != null ? member.paymentAmount : null,
-        paymentSubmittedAt: member.paymentSubmittedAt || null,
-        paymentStatus: member.paymentStatus || null,
       },
-      paymentConfig: { requirePaymentProof, paymentAmount, paymentPhone },
     });
   })
 );
 
 /* ============================================================================
- * SECTION 11 — ADMIN ROUTES
- * ============================================================================
- *
- * - POST /api/admin/login                        : admin login
- * - POST /api/admin/logout                       : clears admin session
- * - GET  /api/admin/me                           : current admin check
- * - GET  /api/admin/registration-status          : is registration open?
- * - POST /api/admin/registration-toggle          : toggle open/closed
- * - GET  /api/admin/settings                     : read all settings
- * - POST /api/admin/settings                     : update settings
- * - GET  /api/admin/paid-summary                 : counts
- * - POST /api/admin/verify-payments              : paste & verify
- * - GET  /api/admin/pending-payments             : list pending
- * - POST /api/admin/members/:id/verify-payment   : manual verify
- * - POST /api/admin/members/:id/reject-payment   : manual reject
- * - GET  /api/admin/dashboard                    : totals + groups + recent
- * - GET  /api/admin/groups                       : list groups
- * - GET  /api/admin/groups/:id                   : group + members
- * - POST /api/admin/groups                       : create group
- * - PATCH /api/admin/groups/:id                  : rename group
- * - DELETE /api/admin/groups/:id                 : delete group
- * - POST /api/admin/members                      : add member
- * - PATCH /api/admin/members/:id                 : edit member
- * - DELETE /api/admin/members/:id                : delete member
+ * SECTION 10 — ADMIN ROUTES
  * ========================================================================== */
 
 // ----------------------------------------------------------------------------
@@ -2470,7 +1382,6 @@ app.post(
     let admin = await Admin.findOne({ username }).select('+passwordHash +passwordSalt');
 
     if (!admin) {
-      // Bootstrap: only env-defined credentials can create the admin.
       if (username !== ADMIN_USERNAME.toLowerCase() || !safeEqual(password, ADMIN_PASSWORD)) {
         console.warn(`[admin-login] rejected unknown user "${username}"`);
         return fail(res, 'Invalid administrator credentials.', 'INVALID_CREDENTIALS', 401);
@@ -2575,19 +1486,12 @@ app.get(
   '/api/admin/settings',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const [registrationOpen, requirePaymentProof, paymentAmount, paymentPhone, maxGroupMembers] =
-      await Promise.all([
-        isRegistrationOpen(),
-        isPaymentProofRequired(),
-        getPaymentAmount(),
-        getPaymentPhone(),
-        getMaxGroupMembers(),
-      ]);
+    const [registrationOpen, maxGroupMembers] = await Promise.all([
+      isRegistrationOpen(),
+      getMaxGroupMembers(),
+    ]);
     return ok(res, {
       registrationOpen,
-      requirePaymentProof,
-      paymentAmount,
-      paymentPhone,
       maxGroupMembers,
       maxGroupMembersHardLimit: CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT,
     });
@@ -2604,28 +1508,6 @@ app.post(
 
     if (body.registrationOpen !== undefined) {
       updates.registration_open = body.registrationOpen === true;
-    }
-
-    if (body.requirePaymentProof !== undefined) {
-      updates.require_payment_proof = body.requirePaymentProof === true;
-    }
-
-    if (body.paymentAmount !== undefined) {
-      const n = Number(body.paymentAmount);
-      if (!Number.isFinite(n) || n < 0 || n > 100000) {
-        errors.push('Payment amount must be a number between 0 and 100000.');
-      } else {
-        updates.payment_amount = Math.round(n);
-      }
-    }
-
-    if (body.paymentPhone !== undefined) {
-      const p = normalizePochiPhone(body.paymentPhone);
-      if (!p) {
-        errors.push('Payment phone must be a valid Kenyan number (e.g. 0741742291).');
-      } else {
-        updates.payment_phone = p.startsWith('+254') ? '0' + p.slice(4) : p;
-      }
     }
 
     if (body.maxGroupMembers !== undefined) {
@@ -2651,237 +1533,17 @@ app.post(
     }
     sseBroadcast('settings-updated', { keys: entries.map(([k]) => k) });
 
-    const [registrationOpen, requirePaymentProof, paymentAmount, paymentPhone, maxGroupMembers] =
-      await Promise.all([
-        isRegistrationOpen(),
-        isPaymentProofRequired(),
-        getPaymentAmount(),
-        getPaymentPhone(),
-        getMaxGroupMembers(),
-      ]);
+    const [registrationOpen, maxGroupMembers] = await Promise.all([
+      isRegistrationOpen(),
+      getMaxGroupMembers(),
+    ]);
 
     return ok(res, {
       message: 'Settings saved.',
       registrationOpen,
-      requirePaymentProof,
-      paymentAmount,
-      paymentPhone,
       maxGroupMembers,
       maxGroupMembersHardLimit: CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT,
     });
-  })
-);
-
-// ----------------------------------------------------------------------------
-// Paid summary
-// ----------------------------------------------------------------------------
-
-app.get(
-  '/api/admin/paid-summary',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    const [total, paid, pending, rejected] = await Promise.all([
-      Member.countDocuments(),
-      Member.countDocuments({ paymentStatus: 'verified' }),
-      Member.countDocuments({ paymentStatus: 'pending' }),
-      Member.countDocuments({ paymentStatus: 'rejected' }),
-    ]);
-    return ok(res, { total, paid, pending, rejected, unpaid: total - paid });
-  })
-);
-
-// ----------------------------------------------------------------------------
-// Paste-and-verify
-// ----------------------------------------------------------------------------
-
-/**
- * POST /api/admin/verify-payments
- *
- * Body: { text: '<pasted M-Pesa SMS>' }
- *
- * Extracts codes from the pasted text and verifies matched members.
- * Responds with counts and a full breakdown of the results.
- */
-app.post(
-  '/api/admin/verify-payments',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    const rawText = String(req.body.text || '').trim();
-    if (!rawText) return fail(res, 'Paste one or more M-Pesa confirmation messages.', 'VALIDATION', 400);
-
-    const paymentPhone = await getPaymentPhone();
-    const entries = extractMpesaEntries(rawText, { excludePhones: [paymentPhone] });
-
-    if (entries.length === 0) {
-      return fail(
-        res,
-        'No M-Pesa codes found in the pasted text. Make sure you paste the full SMS message(s).',
-        'NO_CODES_FOUND',
-        400
-      );
-    }
-
-    const verified = [];
-    const alreadyVerified = [];
-    const unmatched = [];
-    const ambiguous = [];
-
-    for (const entry of entries) {
-      // 1) Match by exact code.
-      let member = await Member.findOne({ mpesaCode: entry.code });
-
-      // 2) Fallback: match by sender phone among pending/rejected/null.
-      if (!member && entry.senderPhone) {
-        const normalized = normalizePhone(entry.senderPhone);
-        if (normalized) {
-          const candidates = await Member.find({
-            phone: normalized,
-            $or: [
-              { paymentStatus: null },
-              { paymentStatus: 'pending' },
-              { paymentStatus: 'rejected' },
-            ],
-          }).limit(5).lean();
-
-          if (candidates.length === 1) {
-            member = await Member.findById(candidates[0]._id);
-          } else if (candidates.length > 1) {
-            ambiguous.push({
-              code: entry.code,
-              senderPhone: entry.senderPhone,
-              count: candidates.length,
-              names: candidates.map((c) => c.name),
-            });
-            continue;
-          }
-        }
-      }
-
-      if (!member) {
-        unmatched.push({ code: entry.code, senderPhone: entry.senderPhone, amount: entry.amount });
-        continue;
-      }
-
-      if (member.paymentStatus === 'verified') {
-        alreadyVerified.push({ code: entry.code, regNo: member.regNo, name: member.name });
-        continue;
-      }
-
-      // Stamp the code and mark verified.
-      member.mpesaCode = entry.code;
-      if (!member.paymentAmount && entry.amount) member.paymentAmount = entry.amount;
-      if (!member.paymentSubmittedAt) member.paymentSubmittedAt = new Date();
-      member.paymentStatus = 'verified';
-      member.paymentVerifiedAt = new Date();
-      member.paymentVerifiedBy = entry.raw.slice(0, 500);
-      member.paymentRejectedReason = null;
-      await member.save();
-
-      verified.push({
-        id: String(member._id),
-        code: entry.code,
-        regNo: member.regNo,
-        name: member.name,
-        phone: member.phone,
-      });
-
-      sseBroadcast('member-updated', {
-        member: shapeMember(member, { includePayment: true }),
-        group: null,
-      });
-    }
-
-    console.log(
-      `[admin] verify-payments: parsed=${entries.length} verified=${verified.length} already=${alreadyVerified.length} unmatched=${unmatched.length} ambiguous=${ambiguous.length}`
-    );
-
-    return ok(res, {
-      message: 'Extraction complete.',
-      total: entries.length,
-      verifiedCount: verified.length,
-      alreadyVerifiedCount: alreadyVerified.length,
-      unmatchedCount: unmatched.length,
-      ambiguousCount: ambiguous.length,
-      results: { verified, alreadyVerified, unmatched, ambiguous },
-    });
-  })
-);
-
-// ----------------------------------------------------------------------------
-// Pending payments
-// ----------------------------------------------------------------------------
-
-app.get(
-  '/api/admin/pending-payments',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    const pending = await Member.find({
-      $or: [{ paymentStatus: 'pending' }, { paymentStatus: 'rejected' }],
-    })
-      .populate('group', 'name')
-      .sort({ paymentSubmittedAt: -1, createdAt: -1 })
-      .limit(300)
-      .lean();
-
-    return ok(res, {
-      pending: pending.map((m) => ({
-        id: String(m._id),
-        regNo: m.regNo,
-        name: m.name,
-        phone: m.phone,
-        groupName: m.group ? m.group.name : '',
-        mpesaCode: m.mpesaCode || null,
-        paymentNote: m.paymentNote || null,
-        paymentAmount: m.paymentAmount != null ? m.paymentAmount : null,
-        paymentSubmittedAt: m.paymentSubmittedAt || null,
-        paymentStatus: m.paymentStatus || 'pending',
-        paymentRejectedReason: m.paymentRejectedReason || null,
-        createdAt: m.createdAt,
-      })),
-    });
-  })
-);
-
-// ----------------------------------------------------------------------------
-// Manual verify / reject
-// ----------------------------------------------------------------------------
-
-app.post(
-  '/api/admin/members/:id/verify-payment',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 'Invalid member ID.', 'INVALID_ID', 400);
-    const member = await Member.findById(req.params.id);
-    if (!member) return fail(res, 'Member not found.', 'NOT_FOUND', 404);
-
-    member.paymentStatus = 'verified';
-    member.paymentVerifiedAt = new Date();
-    member.paymentVerifiedBy = 'manual:' + String(req.body.note || 'admin verification').slice(0, 400);
-    member.paymentRejectedReason = null;
-    if (!member.paymentSubmittedAt) member.paymentSubmittedAt = new Date();
-    if (!member.paymentAmount) member.paymentAmount = await getPaymentAmount();
-    await member.save();
-
-    sseBroadcast('member-updated', { member: shapeMember(member, { includePayment: true }), group: null });
-    return ok(res, { message: 'Payment verified.', member: shapeMember(member, { includePayment: true }) });
-  })
-);
-
-app.post(
-  '/api/admin/members/:id/reject-payment',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 'Invalid member ID.', 'INVALID_ID', 400);
-    const member = await Member.findById(req.params.id);
-    if (!member) return fail(res, 'Member not found.', 'NOT_FOUND', 404);
-
-    const reason = String(req.body.reason || '').trim().slice(0, 200) || 'Code could not be verified.';
-    member.paymentStatus = 'rejected';
-    member.paymentRejectedReason = reason;
-    await member.save();
-
-    sseBroadcast('member-updated', { member: shapeMember(member, { includePayment: true }), group: null });
-    return ok(res, { message: 'Payment rejected.', member: shapeMember(member, { includePayment: true }) });
   })
 );
 
@@ -2893,16 +1555,12 @@ app.get(
   '/api/admin/dashboard',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const [totalMembers, totalGroups, totalLeaders, maxGroupMembers, verifiedCount, pendingCount, rejectedCount] =
-      await Promise.all([
-        Member.countDocuments(),
-        Group.countDocuments(),
-        Member.countDocuments({ isLeader: true }),
-        getMaxGroupMembers(),
-        Member.countDocuments({ paymentStatus: 'verified' }),
-        Member.countDocuments({ paymentStatus: 'pending' }),
-        Member.countDocuments({ paymentStatus: 'rejected' }),
-      ]);
+    const [totalMembers, totalGroups, totalLeaders, maxGroupMembers] = await Promise.all([
+      Member.countDocuments(),
+      Group.countDocuments(),
+      Member.countDocuments({ isLeader: true }),
+      getMaxGroupMembers(),
+    ]);
 
     const groups = await Group.find().sort({ createdAt: 1 }).lean();
     const leaders = await Member.find({ isLeader: true }).select('regNo name group').lean();
@@ -2920,10 +1578,6 @@ app.get(
         totalMembers,
         totalGroups,
         totalLeaders,
-        paid: verifiedCount,
-        pending: pendingCount,
-        rejected: rejectedCount,
-        unpaid: totalMembers - verifiedCount,
       },
       maxGroupMembers,
       groups: groups.map((g) =>
@@ -2942,11 +1596,6 @@ app.get(
         role: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
         groupName: m.group ? m.group.name : null,
         createdAt: m.createdAt,
-        mpesaCode: m.mpesaCode || null,
-        paymentAmount: m.paymentAmount != null ? m.paymentAmount : null,
-        paymentNote: m.paymentNote || null,
-        paymentSubmittedAt: m.paymentSubmittedAt || null,
-        paymentStatus: m.paymentStatus || null,
       })),
     });
   })
@@ -3008,12 +1657,6 @@ app.get(
         isLeader: Boolean(m.isLeader),
         role: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
         createdAt: m.createdAt,
-        mpesaCode: m.mpesaCode || null,
-        paymentAmount: m.paymentAmount != null ? m.paymentAmount : null,
-        paymentNote: m.paymentNote || null,
-        paymentSubmittedAt: m.paymentSubmittedAt || null,
-        paymentStatus: m.paymentStatus || null,
-        paymentRejectedReason: m.paymentRejectedReason || null,
       })),
     });
   })
@@ -3113,8 +1756,6 @@ app.post(
     const name = normalizeName(req.body.name);
     const phone = normalizePhone(req.body.phone);
     const groupId = req.body.groupId;
-    const mpesaCode = normalizeMpesaCode(req.body.mpesaCode);
-    const paymentNote = sanitizePaymentNote(req.body.paymentNote);
 
     if (!isValidRegNo(regNo)) return fail(res, 'Invalid registration number.', 'INVALID_REQNO', 400);
     if (!isValidName(name)) return fail(res, 'Invalid full name.', 'INVALID_NAME', 400);
@@ -3127,18 +1768,8 @@ app.post(
     const dupReg = await Member.findOne({ regNo });
     if (dupReg) return fail(res, 'This registration number has already been registered.', 'DUPLICATE_REGNO', 409);
 
-    if (mpesaCode) {
-      const codeCheck = validateMpesaCodeHard(mpesaCode);
-      if (!codeCheck.valid) return fail(res, codeCheck.reason, 'INVALID_MPESA_CODE', 400);
-
-      const dupCode = await Member.findOne({ mpesaCode }).lean();
-      if (dupCode) return fail(res, 'This M-Pesa code has already been used.', 'DUPLICATE_MPESA_CODE', 409);
-    }
-
     const maxGroupMembers = await getMaxGroupMembers();
-    const paymentAmount = await getPaymentAmount();
 
-    // Atomic capacity check.
     const incremented = await Group.findOneAndUpdate(
       { _id: group._id, memberCount: { $lt: maxGroupMembers } },
       { $inc: { memberCount: 1 } },
@@ -3157,18 +1788,12 @@ app.post(
         phone,
         group: group._id,
         isLeader,
-        mpesaCode: mpesaCode || null,
-        paymentAmount: mpesaCode ? paymentAmount : null,
-        paymentNote: paymentNote || null,
-        paymentSubmittedAt: mpesaCode ? new Date() : null,
-        paymentStatus: mpesaCode ? 'pending' : null,
       });
     } catch (err) {
       await Group.updateOne({ _id: group._id }, { $inc: { memberCount: -1 } });
       if (err && err.code === 11000) {
         const keys = err.keyPattern || {};
         if (keys.regNo) return fail(res, 'This registration number has already been registered.', 'DUPLICATE_REGNO', 409);
-        if (keys.mpesaCode) return fail(res, 'This M-Pesa code has already been used.', 'DUPLICATE_MPESA_CODE', 409);
       }
       throw err;
     }
@@ -3178,11 +1803,11 @@ app.post(
 
     const freshGroup = await Group.findById(group._id);
     sseBroadcast('member-added', {
-      member: shapeMember(member, { includePayment: true }),
+      member: shapeMember(member),
       group: shapeGroup(freshGroup, { capacity: maxGroupMembers }),
     });
 
-    return ok(res, { message: 'Member added.', member: shapeMember(member, { includePayment: true }) }, 201);
+    return ok(res, { message: 'Member added.', member: shapeMember(member) }, 201);
   })
 );
 
@@ -3241,36 +1866,15 @@ app.patch(
       await reconcileGroupLeader(member.group);
     }
 
-    // Optional payment fields.
-    if (req.body.mpesaCode !== undefined) {
-      const code = normalizeMpesaCode(req.body.mpesaCode);
-      if (code) {
-        const codeCheck = validateMpesaCodeHard(code);
-        if (!codeCheck.valid) return fail(res, codeCheck.reason, 'INVALID_MPESA_CODE', 400);
-        const dupCode = await Member.findOne({ mpesaCode: code, _id: { $ne: member._id } });
-        if (dupCode) return fail(res, 'This M-Pesa code has already been used.', 'DUPLICATE_MPESA_CODE', 409);
-      }
-      member.mpesaCode = code || null;
-      member.paymentSubmittedAt = code ? new Date() : null;
-      if (code) {
-        if (!member.paymentAmount) member.paymentAmount = await getPaymentAmount();
-        if (!member.paymentStatus) member.paymentStatus = 'pending';
-      }
-    }
-    if (req.body.paymentNote !== undefined) {
-      member.paymentNote = sanitizePaymentNote(req.body.paymentNote) || null;
-    }
-    await member.save();
-
     const freshGroup = await Group.findById(member.group);
     const freshMember = await Member.findById(member._id);
 
     sseBroadcast('member-updated', {
-      member: shapeMember(freshMember, { includePayment: true }),
+      member: shapeMember(freshMember),
       group: shapeGroup(freshGroup, { capacity: maxGroupMembers }),
     });
 
-    return ok(res, { message: 'Member updated.', member: shapeMember(freshMember, { includePayment: true }) });
+    return ok(res, { message: 'Member updated.', member: shapeMember(freshMember) });
   })
 );
 
@@ -3301,18 +1905,9 @@ app.delete(
 );
 
 /* ============================================================================
- * SECTION 12 — CSV EXPORT
- * ============================================================================
- *
- * Clean columns, no payment data. Sorted by group name then registration
- * date. Excel-friendly (BOM prefixed).
+ * SECTION 11 — CSV EXPORT
  * ========================================================================== */
 
-/**
- * Escape a value for CSV output.
- * @param {any} value
- * @returns {string}
- */
 function csvEscape(value) {
   if (value == null) return '';
   const s = String(value);
@@ -3349,7 +1944,7 @@ app.get(
     }
 
     const csv = lines.join('\r\n');
-    const filename = `physics-education-groups-${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `itb9301-internet-computing-${new Date().toISOString().slice(0, 10)}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -3358,16 +1953,9 @@ app.get(
 );
 
 /* ============================================================================
- * SECTION 13 — PDF EXPORT
- * ============================================================================
- *
- * Three PDFs:
- *   /api/admin/export/pdf         — clean group registry (all groups)
- *   /api/admin/export/paid/pdf    — verified payments only
- *   /api/member/export/pdf        — own group only
+ * SECTION 12 — PDF EXPORT
  * ========================================================================== */
 
-// Palette used by every PDF.
 const PDF_COLORS = {
   textDark: '#111827',
   text: '#1f2937',
@@ -3391,7 +1979,6 @@ const PDF_LAYOUT = Object.freeze({
 const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
 
-/** Format a date with month name, suitable for the PDF header. */
 function pdfFmtLong(d) {
   try {
     return new Date(d).toLocaleString('en-GB', {
@@ -3401,24 +1988,13 @@ function pdfFmtLong(d) {
   } catch (_) { return ''; }
 }
 
-/** Short date format used inside payment rows. */
-function pdfFmtShort(d) {
-  try {
-    return new Date(d).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch (_) { return ''; }
-}
-
-/** Draw the standard page header at the top of every page. */
 function pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle }) {
   doc.save();
   doc.rect(0, 0, pageWidth, 3).fill(PDF_COLORS.textDark);
   doc.restore();
 
   doc.fillColor(PDF_COLORS.textDark).fontSize(18).font('Helvetica-Bold');
-  doc.text('PHYSICS EDUCATION GROUPS', PDF_LAYOUT.margin, 26, {
+  doc.text('ITB9301 - INTERNET COMPUTING', PDF_LAYOUT.margin, 26, {
     width: contentWidth, align: 'left', lineBreak: false,
   });
 
@@ -3439,7 +2015,6 @@ function pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle }) {
   doc.restore();
 }
 
-/** Draw the page footer (confidential note + page number). */
 function pdfDrawFooter(doc, { pageWidth, pageHeight, contentWidth }) {
   const range = doc.bufferedPageRange();
   const totalPages = range.count;
@@ -3458,7 +2033,7 @@ function pdfDrawFooter(doc, { pageWidth, pageHeight, contentWidth }) {
 
     doc.fontSize(7.5).font('Helvetica').fillColor(PDF_COLORS.textMuted);
     doc.text(
-      'Physics Education Groups  •  Confidential administrative document',
+      'ITB9301 - Internet Computing  •  Confidential administrative document',
       contentLeft, footerY, { width: contentWidth * 0.7, align: 'left', lineBreak: false }
     );
     doc.text(
@@ -3469,10 +2044,6 @@ function pdfDrawFooter(doc, { pageWidth, pageHeight, contentWidth }) {
   }
 }
 
-/**
- * Build the clean group registry PDF (all groups + all members).
- * @returns {Promise<Buffer>}
- */
 function buildGroupsPdf({ groups, reportTitle, reportSubtitle, maxGroupMembers }) {
   return new Promise((resolve, reject) => {
     try {
@@ -3488,9 +2059,9 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle, maxGroupMembers }
         autoFirstPage: false,
         info: {
           Title: reportTitle,
-          Author: 'Physics Education Groups',
+          Author: 'ITB9301 - Internet Computing',
           Subject: 'Group Registry',
-          Creator: 'Physics Education Groups',
+          Creator: 'ITB9301 - Internet Computing',
         },
       });
 
@@ -3545,7 +2116,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle, maxGroupMembers }
         y += 16;
       }
 
-      // Summary box
       const summaryBoxHeight = 62;
       doc.save();
       doc.roundedRect(contentLeft, y, contentWidth, summaryBoxHeight, 4)
@@ -3621,7 +2191,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle, maxGroupMembers }
 
         y += headerHeight + 8;
 
-        // Table header
         doc.save();
         doc.rect(contentLeft, y, contentWidth, 22).fill(PDF_COLORS.bgMedium);
         doc.restore();
@@ -3730,191 +2299,6 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle, maxGroupMembers }
   });
 }
 
-/**
- * Build the verified-payments-only PDF.
- * @returns {Promise<Buffer>}
- */
-function buildPaidMembersPdf({ rows, reportTitle, reportSubtitle }) {
-  return new Promise((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({
-        size: PDF_LAYOUT.pageSize,
-        margins: {
-          top: PDF_LAYOUT.margin,
-          bottom: PDF_LAYOUT.margin + 20,
-          left: PDF_LAYOUT.margin,
-          right: PDF_LAYOUT.margin,
-        },
-        bufferPages: true,
-        autoFirstPage: false,
-        info: {
-          Title: reportTitle,
-          Author: 'Physics Education Groups',
-          Subject: 'Verified Payments',
-          Creator: 'Physics Education Groups',
-        },
-      });
-
-      const chunks = [];
-      doc.on('data', (c) => chunks.push(c));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      doc.on('error', (err) => reject(err));
-
-      doc.addPage();
-
-      const pageWidth = (doc.page && doc.page.width) || A4_WIDTH;
-      const pageHeight = (doc.page && doc.page.height) || A4_HEIGHT;
-      const contentWidth = pageWidth - PDF_LAYOUT.margin * 2;
-      const contentLeft = PDF_LAYOUT.margin;
-      const contentRight = pageWidth - PDF_LAYOUT.margin;
-
-      const totals = {
-        count: rows.length,
-        totalAmount: rows.reduce((a, r) => a + (Number(r.paymentAmount) || 0), 0),
-        groups: new Set(rows.map((r) => r.groupName)).size,
-      };
-
-      const rawCols = {
-        idx: 22, group: 92, regNo: 66, name: 100, phone: 66,
-        mpesa: 60, amount: 40, note: 80, paidAt: 72,
-      };
-      const totalRaw = Object.values(rawCols).reduce((a, b) => a + b, 0);
-      const scale = contentWidth / totalRaw;
-      const colWidths = {};
-      const colX = {};
-      let accum = 0;
-      for (const [key, w] of Object.entries(rawCols)) {
-        colX[key] = contentLeft + accum * scale;
-        colWidths[key] = w * scale;
-        accum += w;
-      }
-
-      pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle });
-      let y = 92;
-
-      if (reportSubtitle) {
-        doc.fontSize(10).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
-        doc.text(reportSubtitle, contentLeft, y, { width: contentWidth, align: 'left' });
-        y += 16;
-      }
-
-      const summaryBoxHeight = 62;
-      doc.save();
-      doc.roundedRect(contentLeft, y, contentWidth, summaryBoxHeight, 4)
-        .fillAndStroke(PDF_COLORS.bgSubtle, PDF_COLORS.border);
-      doc.restore();
-
-      const summaryItems = [
-        { label: 'VERIFIED PAYMENTS', value: String(totals.count) },
-        { label: 'GROUPS WITH PAYMENTS', value: String(totals.groups) },
-        { label: 'TOTAL AMOUNT (KSH)', value: String(totals.totalAmount) },
-        { label: 'REPORT TYPE', value: 'VERIFIED' },
-      ];
-      const itemWidth = contentWidth / summaryItems.length;
-      summaryItems.forEach((item, i) => {
-        const ix = contentLeft + i * itemWidth + 14;
-        doc.fontSize(7.5).font('Helvetica-Bold').fillColor(PDF_COLORS.textMuted);
-        doc.text(item.label, ix, y + 12, { width: itemWidth - 20, align: 'left' });
-        doc.fontSize(17).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
-        doc.text(item.value, ix, y + 26, { width: itemWidth - 20, align: 'left' });
-      });
-      y += summaryBoxHeight + 22;
-
-      function ensureSpace(needed) {
-        if (y + needed > pageHeight - PDF_LAYOUT.margin - PDF_LAYOUT.footerHeight + 10) {
-          doc.addPage();
-          pdfDrawHeader(doc, { pageWidth, contentWidth, reportTitle });
-          y = 92;
-        }
-      }
-
-      // Header row
-      ensureSpace(40);
-      doc.save();
-      doc.rect(contentLeft, y, contentWidth, 22).fill(PDF_COLORS.bgMedium);
-      doc.restore();
-
-      const headerY = y + 7;
-      doc.fontSize(7.5).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
-      doc.text('#', colX.idx + 3, headerY, { width: colWidths.idx - 6, align: 'left', lineBreak: false });
-      doc.text('GROUP', colX.group + 4, headerY, { width: colWidths.group - 8, align: 'left', lineBreak: false });
-      doc.text('REG NO', colX.regNo + 4, headerY, { width: colWidths.regNo - 8, align: 'left', lineBreak: false });
-      doc.text('NAME', colX.name + 4, headerY, { width: colWidths.name - 8, align: 'left', lineBreak: false });
-      doc.text('PHONE', colX.phone + 4, headerY, { width: colWidths.phone - 8, align: 'left', lineBreak: false });
-      doc.text('M-PESA', colX.mpesa + 4, headerY, { width: colWidths.mpesa - 8, align: 'left', lineBreak: false });
-      doc.text('KSH', colX.amount + 4, headerY, { width: colWidths.amount - 8, align: 'left', lineBreak: false });
-      doc.text('NOTE', colX.note + 4, headerY, { width: colWidths.note - 8, align: 'left', lineBreak: false });
-      doc.text('PAID AT', colX.paidAt + 4, headerY, { width: colWidths.paidAt - 8, align: 'left', lineBreak: false });
-      y += 22;
-
-      function drawRow(r, idx) {
-        const rowHeight = 24;
-        ensureSpace(rowHeight + 2);
-
-        if (idx % 2 === 1) {
-          doc.save();
-          doc.rect(contentLeft, y, contentWidth, rowHeight).fill(PDF_COLORS.bgSubtle);
-          doc.restore();
-        }
-
-        const cellY = y + 8;
-        doc.fontSize(8).font('Helvetica').fillColor(PDF_COLORS.text);
-        doc.text(String(idx), colX.idx + 3, cellY, { width: colWidths.idx - 6, align: 'left', lineBreak: false, ellipsis: true });
-        doc.text(r.groupName || '', colX.group + 4, cellY, { width: colWidths.group - 8, align: 'left', lineBreak: false, ellipsis: true });
-        doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
-        doc.text(r.regNo || '', colX.regNo + 4, cellY, { width: colWidths.regNo - 8, align: 'left', lineBreak: false, ellipsis: true });
-        doc.font('Helvetica').fillColor(PDF_COLORS.text);
-        doc.text(r.name || '', colX.name + 4, cellY, { width: colWidths.name - 8, align: 'left', lineBreak: false, ellipsis: true });
-        doc.fillColor(PDF_COLORS.textMuted);
-        doc.text(r.phone || '', colX.phone + 4, cellY, { width: colWidths.phone - 8, align: 'left', lineBreak: false, ellipsis: true });
-        doc.font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
-        doc.text(r.mpesaCode || '', colX.mpesa + 4, cellY, { width: colWidths.mpesa - 8, align: 'left', lineBreak: false, ellipsis: true });
-        doc.font('Helvetica').fillColor(PDF_COLORS.text);
-        doc.text(r.paymentAmount != null ? String(r.paymentAmount) : '', colX.amount + 4, cellY, { width: colWidths.amount - 8, align: 'left', lineBreak: false, ellipsis: true });
-        doc.fillColor(PDF_COLORS.textMuted);
-        doc.text(r.paymentNote || '', colX.note + 4, cellY, { width: colWidths.note - 8, align: 'left', lineBreak: false, ellipsis: true });
-        doc.fontSize(7.5).fillColor(PDF_COLORS.textMuted);
-        doc.text(r.paymentSubmittedAt ? pdfFmtShort(r.paymentSubmittedAt) : '', colX.paidAt + 4, cellY + 1, { width: colWidths.paidAt - 8, align: 'left', lineBreak: false, ellipsis: true });
-
-        doc.save();
-        doc.moveTo(contentLeft, y + rowHeight)
-          .lineTo(contentRight, y + rowHeight)
-          .strokeColor(PDF_COLORS.borderLight).lineWidth(0.4).stroke();
-        doc.restore();
-
-        y += rowHeight;
-      }
-
-      if (rows.length === 0) {
-        doc.fontSize(11).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
-        doc.text('No verified payments recorded yet.', contentLeft, y + 20, {
-          width: contentWidth, align: 'center',
-        });
-      } else {
-        rows.forEach((r, i) => drawRow(r, i + 1));
-
-        y += 12;
-        ensureSpace(30);
-        doc.save();
-        doc.moveTo(contentLeft, y).lineTo(contentRight, y)
-          .strokeColor(PDF_COLORS.border).lineWidth(0.7).stroke();
-        doc.restore();
-
-        doc.fontSize(10).font('Helvetica-Bold').fillColor(PDF_COLORS.textDark);
-        doc.text(
-          `Total verified: ${totals.count} member(s)  •  Total collected: KSH ${totals.totalAmount}`,
-          contentLeft, y + 8, { width: contentWidth, align: 'right' }
-        );
-      }
-
-      pdfDrawFooter(doc, { pageWidth, pageHeight, contentWidth });
-      doc.end();
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
-
 app.get(
   '/api/admin/export/pdf',
   requireAdmin,
@@ -3961,11 +2345,11 @@ app.get(
       const pdfBuffer = await buildGroupsPdf({
         groups: groupsWithMembers,
         reportTitle: 'Complete Group Registry',
-        reportSubtitle: `All Physics Education groups and their members (${groupsWithMembers.length} group${groupsWithMembers.length === 1 ? '' : 's'}).`,
+        reportSubtitle: `All ITB9301 - Internet Computing groups and their members (${groupsWithMembers.length} group${groupsWithMembers.length === 1 ? '' : 's'}).`,
         maxGroupMembers,
       });
 
-      const filename = `physics-education-groups-complete-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const filename = `itb9301-complete-${new Date().toISOString().slice(0, 10)}.pdf`;
       console.log(`[admin] PDF export generated (${groupsWithMembers.length} groups, ${formatBytes(pdfBuffer.length)})`);
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -3975,59 +2359,6 @@ app.get(
       return res.status(200).end(pdfBuffer);
     } catch (pdfErr) {
       console.error('[admin-pdf] ERROR:', pdfErr && pdfErr.stack ? pdfErr.stack : pdfErr);
-      throw pdfErr;
-    }
-  })
-);
-
-app.get(
-  '/api/admin/export/paid/pdf',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    try {
-      const paidMembers = await Member.find({ paymentStatus: 'verified' })
-        .populate('group', 'name normalizedName')
-        .lean();
-
-      paidMembers.sort((a, b) => {
-        const ga = (a.group && a.group.name ? a.group.name : '').toLowerCase();
-        const gb = (b.group && b.group.name ? b.group.name : '').toLowerCase();
-        if (ga < gb) return -1;
-        if (ga > gb) return 1;
-        const pa = a.paymentVerifiedAt ? new Date(a.paymentVerifiedAt).getTime() : 0;
-        const pb = b.paymentVerifiedAt ? new Date(b.paymentVerifiedAt).getTime() : 0;
-        if (pa !== pb) return pa - pb;
-        return String(a.regNo).localeCompare(String(b.regNo));
-      });
-
-      const rows = paidMembers.map((m) => ({
-        groupName: m.group ? m.group.name : '',
-        regNo: m.regNo,
-        name: m.name,
-        phone: m.phone,
-        mpesaCode: m.mpesaCode || '',
-        paymentAmount: m.paymentAmount != null ? m.paymentAmount : null,
-        paymentNote: m.paymentNote || '',
-        paymentSubmittedAt: m.paymentSubmittedAt || null,
-        isLeader: Boolean(m.isLeader),
-      }));
-
-      const pdfBuffer = await buildPaidMembersPdf({
-        rows,
-        reportTitle: 'Verified Payments — Reconciliation Report',
-        reportSubtitle: `Only members whose M-Pesa codes have been verified by the admin (${rows.length} record${rows.length === 1 ? '' : 's'}).`,
-      });
-
-      const filename = `physics-education-groups-paid-${new Date().toISOString().slice(0, 10)}.pdf`;
-      console.log(`[admin] PAID PDF export generated (${rows.length} verified members, ${formatBytes(pdfBuffer.length)})`);
-
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.setHeader('Content-Length', String(pdfBuffer.length));
-      res.setHeader('Cache-Control', 'no-store');
-      return res.status(200).end(pdfBuffer);
-    } catch (pdfErr) {
-      console.error('[admin-paid-pdf] ERROR:', pdfErr && pdfErr.stack ? pdfErr.stack : pdfErr);
       throw pdfErr;
     }
   })
@@ -4077,7 +2408,7 @@ app.get(
       });
 
       const safeName = group.name.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'group';
-      const filename = `physics-group-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const filename = `itb9301-group-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
       console.log(`[member] PDF export generated for group "${group.name}" (${formatBytes(pdfBuffer.length)})`);
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -4093,11 +2424,7 @@ app.get(
 );
 
 /* ============================================================================
- * SECTION 14 — SSE ENDPOINT
- * ============================================================================
- *
- * Admin dashboard subscribes here for live updates. The connection stays
- * open; we send a heartbeat every 25 seconds. Requires an admin session.
+ * SECTION 13 — SSE ENDPOINT
  * ========================================================================== */
 
 app.get('/api/admin/events', requireAdmin, (req, res) => {
@@ -4107,7 +2434,6 @@ app.get('/api/admin/events', requireAdmin, (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   if (res.flushHeaders) res.flushHeaders();
 
-  // Greeting event so the client knows the stream is live.
   res.write(`event: hello\ndata: ${JSON.stringify({ ts: Date.now() })}\n\n`);
 
   sseClients.add(res);
@@ -4119,12 +2445,7 @@ app.get('/api/admin/events', requireAdmin, (req, res) => {
 });
 
 /* ============================================================================
- * SECTION 15 — STATIC FILES & PAGE ROUTES
- * ============================================================================
- *
- * Serves the /public directory and routes pretty URLs to the correct HTML
- * files. HTML files are always revalidated (no long cache) so deploys are
- * picked up immediately.
+ * SECTION 14 — STATIC FILES & PAGE ROUTES
  * ========================================================================== */
 
 const publicDir = path.join(__dirname, 'public');
@@ -4154,12 +2475,7 @@ app.get(
 );
 
 /* ============================================================================
- * SECTION 16 — 404 & ERROR HANDLERS
- * ============================================================================
- *
- * API 404s return JSON. Non-API 404s serve 404.html if available.
- * The error handler strips stack traces and Mongo internals from user
- * responses and logs the full error server-side.
+ * SECTION 15 — 404 & ERROR HANDLERS
  * ========================================================================== */
 
 app.use('/api', (req, res) => fail(res, 'Endpoint not found.', 'NOT_FOUND', 404));
@@ -4173,36 +2489,30 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
 
-  // Known application error.
   if (err instanceof AppError) {
     console.warn(`[error] ${err.code}: ${err.message}`);
     return fail(res, err.message, err.code, err.status);
   }
 
-  // Mongoose validation error.
   if (err && err.name === 'ValidationError') {
     const first = Object.values(err.errors)[0];
     console.warn('[error] ValidationError:', first ? first.message : err.message);
     return fail(res, first ? first.message : 'Validation error.', 'VALIDATION', 400);
   }
 
-  // Duplicate key.
   if (err && err.code === 11000) {
     console.warn('[error] Duplicate key:', JSON.stringify(err.keyPattern || {}));
     const keys = err.keyPattern || {};
     if (keys.regNo) return fail(res, 'This registration number already exists.', 'DUPLICATE_REGNO', 409);
     if (keys.deviceId) return fail(res, 'This device has already been used.', 'DEVICE_USED', 409);
     if (keys.normalizedName) return fail(res, 'A group with that name already exists.', 'DUPLICATE_GROUP', 409);
-    if (keys.mpesaCode) return fail(res, 'This M-Pesa code has already been used.', 'DUPLICATE_MPESA_CODE', 409);
     return fail(res, 'Duplicate value.', 'DUPLICATE', 409);
   }
 
-  // Bad ObjectId.
   if (err && err.name === 'CastError') {
     return fail(res, 'Invalid identifier.', 'INVALID_ID', 400);
   }
 
-  // Unknown error — log the full stack server-side, respond generically.
   console.error('[error] Unhandled:', err && err.stack ? err.stack : err);
   return fail(
     res,
@@ -4213,19 +2523,11 @@ app.use((err, req, res, next) => {
 });
 
 /* ============================================================================
- * SECTION 17 — SERVER STARTUP & SHUTDOWN
- * ============================================================================
- *
- * Binds to 0.0.0.0:$PORT (required by Render). Handles SIGTERM/SIGINT
- * gracefully by closing the HTTP server, ending SSE streams, and closing
- * the MongoDB connection.
+ * SECTION 16 — SERVER STARTUP & SHUTDOWN
  * ========================================================================== */
 
 let httpServer = null;
 
-/**
- * Start the HTTP server.
- */
 async function start() {
   try {
     await connectDatabase();
@@ -4244,10 +2546,6 @@ async function start() {
   }
 }
 
-/**
- * Graceful shutdown.
- * @param {string} signal
- */
 async function shutdown(signal) {
   console.log(`\n[shutdown] Received ${signal}. Closing gracefully...`);
   try {
