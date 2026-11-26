@@ -9,8 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%90%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/style.css" />
 <style>
-  /* Safety net: any element with the [hidden] attribute is truly hidden,
-     even if a class rule later tries to give it a display property. */
+  /* Safety net: any element with the [hidden] attribute is truly hidden. */
   [hidden] { display: none !important; }
 
   /* ------------------------------------------------------------------
@@ -46,8 +45,6 @@
     margin: 8px 0;
     font-size: 0.9rem;
   }
-  .guide-example .good { color: #15803d; font-weight: 600; }
-  .guide-example .bad  { color: #b91c1c; font-weight: 600; }
 
   .guide-rules {
     list-style: none;
@@ -69,6 +66,36 @@
     color: #15803d;
     font-weight: 700;
     font-size: 1rem;
+  }
+
+  /* ------------------------------------------------------------------
+     Group select
+     ------------------------------------------------------------------ */
+  #groupName {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 1rem;
+    color: #1f2937;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='%236b7280' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 10px;
+    cursor: pointer;
+  }
+  #groupName:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  }
+  #groupName:disabled {
+    background-color: #f1f5f9;
+    cursor: not-allowed;
+    color: #6b7280;
   }
 </style>
 </head>
@@ -100,7 +127,7 @@
     <h1>Join an Internet Computing Group</h1>
     <p class="hero-sub">
       Register below to be added to your group. Each group holds a
-      maximum of <strong id="hero-capacity">10 members</strong>. The first
+      maximum of <strong id="hero-capacity">50 members</strong>. The first
       member of a new group automatically becomes the
       <strong>Group Leader</strong>.
     </p>
@@ -178,22 +205,14 @@
         <p class="field-error" data-error-for="phone" hidden></p>
       </div>
 
-      <!-- ---------- Group Name ---------- -->
+      <!-- ---------- Group (dropdown) ---------- -->
       <div class="field">
-        <label for="groupName">Group Name <span class="req" aria-hidden="true">*</span></label>
-        <input
-          id="groupName"
-          name="groupName"
-          type="text"
-          autocomplete="off"
-          maxlength="80"
-          placeholder="e.g. Internet Computing Group A"
-          required
-          aria-describedby="group-help"
-        />
+        <label for="groupName">Choose Your Group <span class="req" aria-hidden="true">*</span></label>
+        <select id="groupName" name="groupIndex" required aria-describedby="group-help" disabled>
+          <option value="">Loading groups…</option>
+        </select>
         <p id="group-help" class="help">
-          Type a new name to create a group, or an existing name to join one.
-          Capitalization and spaces are ignored when matching groups.
+          Select a group from the list. Groups that are already full cannot be chosen.
         </p>
         <p class="field-error" data-error-for="groupName" hidden></p>
       </div>
@@ -213,7 +232,7 @@
 
       <p class="muted small form-footnote">
         By registering you agree to have your Registration Number, Full Name,
-        Phone Number, and Group Name stored by the ITB9301 - Internet Computing
+        Phone Number, and Group stored by the ITB9301 - Internet Computing
         system for group management purposes. A device identifier is also
         recorded to prevent duplicate submissions.
       </p>
@@ -269,8 +288,13 @@
         <li>Your <strong>Registration Number</strong> (e.g. REG12345)</li>
         <li>Your <strong>Full Name</strong></li>
         <li>Your <strong>Phone Number</strong> (e.g. 0712345678)</li>
-        <li>The <strong>Group Name</strong> you want to join</li>
+        <li>The <strong>Group</strong> you want to join — pick one from the dropdown</li>
       </ul>
+      <p>
+        The dropdown shows every group that still has room. If a group is
+        already full, it will appear greyed out and you will not be able to
+        select it.
+      </p>
     </div>
 
     <!-- Step 2 -->
@@ -286,8 +310,8 @@
     <div class="guide-step">
       <p class="guide-step-title">STEP 3 — Logging in later</p>
       <p>
-        After registering, log in at the Member Login page using your
-        <strong>Group Name</strong> as the username and your
+        After registering, log in at the Member Login page by selecting
+        the <strong>same group</strong> from the dropdown and entering your
         <strong>Registration Number</strong> as the password.
       </p>
     </div>
@@ -299,42 +323,36 @@
   </section>
 
   <!-- ============================================================ -->
-  <!-- GROUP FORMATION RULES — why one name matters                 -->
+  <!-- GROUP FORMATION RULES                                        -->
   <!-- ============================================================ -->
   <section class="card card-info" aria-labelledby="rules-title">
     <div class="card-head">
-      <h2 id="rules-title">Group Formation Rules</h2>
-      <p class="muted">Read this before choosing a group name.</p>
+      <h2 id="rules-title">How Groups Work</h2>
+      <p class="muted">Read this before choosing a group.</p>
     </div>
 
     <div class="guide-step">
-      <p class="guide-step-title">Group size</p>
-      <ul>
-        <li><strong>Minimum:</strong> 13 people</li>
-        <li><strong>Maximum:</strong> 15 people</li>
-      </ul>
-    </div>
-
-    <div class="guide-step">
-      <p class="guide-step-title">Agree on ONE group name — and why it matters</p>
+      <p class="guide-step-title">Group list</p>
       <p>
-        Everyone in the group <strong>must type the exact same group
-        name</strong>. If different people type different names, the system
-        will create separate groups and your team will be split up.
+        Groups are pre-created by the Administrator and appear in the
+        dropdown as <strong>Group 1</strong>, <strong>Group 2</strong>, and
+        so on. Pick whichever group you have agreed on with your team.
       </p>
-      <div class="guide-example">
-        <p style="margin:0 0 4px;">
-          <span class="good">✓ Everyone types:</span> <code>Internet Computing Group A</code>
-        </p>
-        <p style="margin:0;">
-          <span class="bad">✗ Avoid:</span> <code>Group A</code>,
-          <code>group a</code>, <code>GroupA</code> — any other difference
-          puts you in a different group.
-        </p>
-      </div>
+    </div>
+
+    <div class="guide-step">
+      <p class="guide-step-title">Capacity</p>
       <p>
-        <strong>Rule:</strong> Sit together, agree on the spelling, and
-        everyone uses the same name.
+        Each group has a fixed capacity. Once a group is full, it can no
+        longer be selected — pick a different group that still has room.
+      </p>
+    </div>
+
+    <div class="guide-step">
+      <p class="guide-step-title">Group Leader</p>
+      <p>
+        The <strong>first person to register</strong> in a group
+        automatically becomes that group's <strong>Group Leader</strong>.
       </p>
     </div>
 
@@ -343,9 +361,9 @@
       <ul class="guide-rules">
         <li>One phone = one registration</li>
         <li>One registration number = one student</li>
-        <li>Group maximum = 15 members</li>
-        <li>Group minimum = 13 members</li>
-        <li>Everyone must use the SAME group name</li>
+        <li>Every member of a team must register into the SAME group</li>
+        <li>Full groups cannot be chosen</li>
+        <li>Group leaders are assigned automatically</li>
       </ul>
     </div>
   </section>
