@@ -4,95 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="theme-color" content="#0b3d91" />
-<meta name="description" content="Physics Education Groups — register into your Physics Education group." />
-<title>PHYSICS EDUCATION GROUPS — Register</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%9B%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+<meta name="description" content="ITB9301 - Internet Computing — register into your group." />
+<title>ITB9301 - INTERNET COMPUTING — Register</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%90%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/style.css" />
 <style>
   /* Safety net: any element with the [hidden] attribute is truly hidden,
-     even if a class rule later tries to give it a display property. This
-     guarantees the payment proof section stays invisible on the public
-     site unless app.js explicitly reveals it. */
+     even if a class rule later tries to give it a display property. */
   [hidden] { display: none !important; }
-
-  /* ------------------------------------------------------------------
-     Payment card
-     ------------------------------------------------------------------ */
-  .payment-body { display: flex; flex-direction: column; gap: 12px; }
-  .payment-instructions p { margin: 0 0 8px; }
-  .payment-phone-line { font-size: 1.05rem; }
-  .payment-phone {
-    font-weight: 700;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    letter-spacing: 0.02em;
-    color: #0b3d91;
-  }
-  .payment-note-box {
-    background: #fef9c3;
-    border: 1px solid #fde68a;
-    border-radius: 8px;
-    padding: 12px 14px;
-    margin: 12px 0;
-  }
-  .payment-note-title {
-    font-weight: 700;
-    color: #854d0e;
-    margin: 0 0 6px;
-  }
-  .payment-note-list {
-    margin: 0 0 8px 18px;
-    padding: 0;
-  }
-  .payment-note-list li { margin-bottom: 2px; }
-
-  /* ------------------------------------------------------------------
-     Warning block shown above the M-Pesa code field
-     ------------------------------------------------------------------ */
-  .payment-warning {
-    background: #fdeaea;
-    border: 1px solid #f3b9b9;
-    border-left: 4px solid #b91c1c;
-    border-radius: 8px;
-    padding: 12px 14px;
-    margin: 8px 0 4px;
-    font-size: 0.9rem;
-    color: #7f1d1d;
-  }
-  .payment-warning-title {
-    font-weight: 700;
-    color: #b91c1c;
-    margin: 0 0 6px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .payment-warning ul {
-    margin: 0 0 6px 18px;
-    padding: 0;
-  }
-  .payment-warning li { margin-bottom: 3px; }
-  .payment-warning strong { color: #7f1d1d; }
-
-  /* ------------------------------------------------------------------
-     Lab manual notice
-     ------------------------------------------------------------------ */
-  .lab-manual-notice {
-    background: #e7eefb;
-    border: 1px solid #cfdcf4;
-    border-left: 4px solid #0b3d91;
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin: 8px 0;
-  }
-  .lab-manual-title {
-    margin: 0 0 6px;
-    color: #0b3d91;
-    font-size: 1.05rem;
-  }
-  .lab-manual-notice p {
-    margin: 0 0 6px;
-    font-size: 0.93rem;
-  }
 
   /* ------------------------------------------------------------------
      Student instructions / steps
@@ -161,9 +80,9 @@
 <header class="site-header">
   <div class="container header-inner">
     <a class="brand" href="/">
-      <span class="brand-mark" aria-hidden="true">⚛</span>
+      <span class="brand-mark" aria-hidden="true">🌐</span>
       <span class="brand-text">
-        <strong>PHYSICS EDUCATION GROUPS</strong>
+        <strong>ITB9301 - INTERNET COMPUTING</strong>
         <small>Student Group Registration</small>
       </span>
     </a>
@@ -178,7 +97,7 @@
 
   <!-- ---------- HERO ---------- -->
   <section class="hero">
-    <h1>Join a Physics Education Group</h1>
+    <h1>Join an Internet Computing Group</h1>
     <p class="hero-sub">
       Register below to be added to your group. Each group holds a
       maximum of <strong id="hero-capacity">10 members</strong>. The first
@@ -189,56 +108,6 @@
 
   <!-- ---------- ALERT REGION ---------- -->
   <div id="alert-region" class="alert-region" role="status" aria-live="polite" aria-atomic="true"></div>
-
-  <!-- ============================================================ -->
-  <!-- PAYMENT CARD — HIDDEN BY DEFAULT.                            -->
-  <!-- Only shown by app.js when /api/payment-config returns        -->
-  <!-- requirePaymentProof === true.                                -->
-  <!-- ============================================================ -->
-  <section
-    id="payment-card"
-    class="card card-info"
-    hidden
-    aria-labelledby="payment-title"
-  >
-    <div class="card-head">
-      <h2 id="payment-title">Lab Manual Payment Required</h2>
-      <p class="muted">
-        Please complete the payment below so your Lab Manual can be prepared.
-      </p>
-    </div>
-
-    <div class="payment-body">
-      <div class="payment-instructions">
-        <p>
-          <strong>Send KSH <span id="payment-amount">45</span></strong> via
-          M-Pesa to:
-        </p>
-        <p class="payment-phone-line">
-          <span class="payment-phone" id="payment-phone">0741742291</span>
-          <span class="muted small">(Pochi la Biashara)</span>
-        </p>
-
-        <div class="payment-note-box">
-          <p class="payment-note-title">⚠️ Important — Write these down:</p>
-          <ul class="payment-note-list">
-            <li>The <strong>time</strong> you paid</li>
-            <li>The <strong>day/date</strong> you paid</li>
-            <li>The <strong>M-Pesa confirmation code</strong> from your SMS</li>
-          </ul>
-          <p class="small">
-            You will use these details to <strong>collect your Lab Manual</strong>.
-            Keep the SMS safe.
-          </p>
-        </div>
-
-        <p class="muted small">
-          After paying, paste your M-Pesa confirmation code and note the time
-          and day in the fields below, then submit the registration form.
-        </p>
-      </div>
-    </div>
-  </section>
 
   <!-- ============================================================ -->
   <!-- REGISTRATION CARD                                            -->
@@ -318,7 +187,7 @@
           type="text"
           autocomplete="off"
           maxlength="80"
-          placeholder="e.g. Physics Group A"
+          placeholder="e.g. Internet Computing Group A"
           required
           aria-describedby="group-help"
         />
@@ -327,73 +196,6 @@
           Capitalization and spaces are ignored when matching groups.
         </p>
         <p class="field-error" data-error-for="groupName" hidden></p>
-      </div>
-
-      <!-- ============================================================ -->
-      <!-- PAYMENT FIELDS — HIDDEN BY DEFAULT.                          -->
-      <!-- Only revealed by app.js when payment proof mode is ON.       -->
-      <!-- ============================================================ -->
-      <div class="field" id="field-mpesa" hidden>
-        <label for="mpesaCode">
-          M-Pesa Confirmation Code <span class="req" aria-hidden="true">*</span>
-        </label>
-
-        <!-- Warning block: reinforces that guessed codes are rejected -->
-        <div class="payment-warning">
-          <p class="payment-warning-title">⚠️ Read this before you type</p>
-          <p style="margin:0 0 6px;">
-            Your M-Pesa code is <strong>checked against the Administrator's
-            M-Pesa statement</strong>. The following will be rejected:
-          </p>
-          <ul>
-            <li>Made-up or guessed codes</li>
-            <li>Codes already used by another student</li>
-            <li>Codes not from an M-Pesa SMS</li>
-          </ul>
-          <p style="margin:6px 0 0;">
-            Only paste the code from the SMS you received after sending
-            <strong>KSH 45</strong>. If your code is fake, your registration
-            will be <strong>rejected</strong> and you will not receive your
-            Lab Manual.
-          </p>
-        </div>
-
-        <input
-          id="mpesaCode"
-          name="mpesaCode"
-          type="text"
-          inputmode="text"
-          autocomplete="off"
-          spellcheck="false"
-          autocapitalize="characters"
-          maxlength="10"
-          minlength="10"
-          placeholder="e.g. QJ71X2Y3Z4"
-          aria-describedby="mpesa-help"
-        />
-        <p id="mpesa-help" class="help">
-          Exactly 10 characters, from the M-Pesa SMS you received after paying.
-        </p>
-        <p class="field-error" data-error-for="mpesaCode" hidden></p>
-      </div>
-
-      <div class="field" id="field-payment-note" hidden>
-        <label for="paymentNote">
-          Time &amp; Day you paid <span class="req" aria-hidden="true">*</span>
-        </label>
-        <input
-          id="paymentNote"
-          name="paymentNote"
-          type="text"
-          autocomplete="off"
-          maxlength="200"
-          placeholder="e.g. Paid on Monday 23 Sept at 3:45 PM"
-          aria-describedby="payment-note-help"
-        />
-        <p id="payment-note-help" class="help">
-          Note it down carefully — you will use this to collect your Lab Manual.
-        </p>
-        <p class="field-error" data-error-for="paymentNote" hidden></p>
       </div>
 
       <!-- ---------- Hidden device metadata ---------- -->
@@ -411,7 +213,7 @@
 
       <p class="muted small form-footnote">
         By registering you agree to have your Registration Number, Full Name,
-        Phone Number, and Group Name stored by the Physics Education Groups
+        Phone Number, and Group Name stored by the ITB9301 - Internet Computing
         system for group management purposes. A device identifier is also
         recorded to prevent duplicate submissions.
       </p>
@@ -428,21 +230,6 @@
     <div class="success-body">
       <p id="success-message" class="success-message"></p>
       <dl class="kv" id="success-details"></dl>
-
-      <!-- Persistent notice — always visible after a successful submission -->
-      <div class="lab-manual-notice" id="lab-manual-notice">
-        <h3 class="lab-manual-title">📘 Lab Manuals are available</h3>
-        <p>
-          Your Lab Manual is now ready for collection. To pick it up, simply
-          <strong>show the time and day you paid</strong> for it, or your
-          <strong>M-Pesa confirmation code</strong>, to the Administrator.
-        </p>
-        <p class="muted small">
-          Keep the M-Pesa SMS on your phone until you have received your Lab
-          Manual. If you have not yet paid, please do so and contact the
-          Administrator.
-        </p>
-      </div>
 
       <div class="form-actions">
         <a class="btn btn-primary" id="success-login-link" href="/member-login">
@@ -471,8 +258,7 @@
     </div>
 
     <p class="guide-intro">
-      Use this guide to register your Physics Education group and collect
-      your Lab Manual.
+      Use this guide to register into your Internet Computing group.
     </p>
 
     <!-- Step 1 -->
@@ -489,46 +275,16 @@
 
     <!-- Step 2 -->
     <div class="guide-step">
-      <p class="guide-step-title">STEP 2 — If you see a Payment box</p>
-      <p>
-        When payment is required, send <strong>KSH 45</strong> via M-Pesa to
-        <strong>0741742291</strong> (Pochi la Biashara).
-      </p>
-      <p>
-        <strong>⚠️ The moment you pay, write down THREE things:</strong>
-      </p>
-      <ul>
-        <li>🕐 The <strong>time</strong> you paid (e.g. 3:45 PM)</li>
-        <li>📅 The <strong>day</strong> you paid (e.g. Monday, 23 Sept)</li>
-        <li>🔢 The <strong>M-Pesa code</strong> from your SMS</li>
-      </ul>
-      <p>
-        Then paste the M-Pesa code and the time &amp; day into the form.
-      </p>
-    </div>
-
-    <!-- Step 3 -->
-    <div class="guide-step">
-      <p class="guide-step-title">STEP 3 — Submit your registration</p>
+      <p class="guide-step-title">STEP 2 — Submit your registration</p>
       <p>
         Click <strong>SUBMIT REGISTRATION</strong>. You will see a green
         success message. You are done.
       </p>
     </div>
 
-    <!-- Step 4 -->
+    <!-- Step 3 -->
     <div class="guide-step">
-      <p class="guide-step-title">STEP 4 — Collect your Lab Manual</p>
-      <p>
-        Show the Administrator <strong>the time and day you paid</strong> or
-        your <strong>M-Pesa code</strong>. That is how you receive your Lab
-        Manual.
-      </p>
-    </div>
-
-    <!-- Logging in -->
-    <div class="guide-step">
-      <p class="guide-step-title">Logging in later</p>
+      <p class="guide-step-title">STEP 3 — Logging in later</p>
       <p>
         After registering, log in at the Member Login page using your
         <strong>Group Name</strong> as the username and your
@@ -537,8 +293,8 @@
     </div>
 
     <p class="muted small">
-      Do not share your M-Pesa SMS or code with anyone. Each phone can
-      register only once.
+      Each phone can register only once. Do not share your registration
+      details with anyone.
     </p>
   </section>
 
@@ -568,7 +324,7 @@
       </p>
       <div class="guide-example">
         <p style="margin:0 0 4px;">
-          <span class="good">✓ Everyone types:</span> <code>Physics Practical Group A</code>
+          <span class="good">✓ Everyone types:</span> <code>Internet Computing Group A</code>
         </p>
         <p style="margin:0;">
           <span class="bad">✗ Avoid:</span> <code>Group A</code>,
@@ -601,7 +357,7 @@
 <!-- ============================================================ -->
 <footer class="site-footer">
   <div class="container footer-inner">
-    <p>© <span id="footer-year"></span> Physics Education Groups. All rights reserved.</p>
+    <p>© <span id="footer-year"></span> ITB9301 - Internet Computing. All rights reserved.</p>
     <p class="muted small">Built with Node.js, Express, MongoDB, and Vanilla JS.</p>
   </div>
 </footer>
