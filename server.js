@@ -27,7 +27,7 @@
  *   SECTION 2  — UTILITIES & HELPERS
  *   SECTION 3  — DATABASE CONNECTION
  *   SECTION 4  — MONGOOSE MODELS
- *   SECTION 5  — SETTINGS & BUSINESS HELPERS
+ *   SECTION 5  — SETTINGS & GROUP PROVISIONING
  *   SECTION 6  — SERVER-SENT EVENTS (SSE)
  *   SECTION 7  — EXPRESS APP & MIDDLEWARE
  *   SECTION 8  — PUBLIC ROUTES
@@ -42,41 +42,18 @@
  *
  *  CHANGE LOG
  *  ----------
- *   v1.0.0 — Initial release. Basic registration, groups, members, admin.
- *   v1.1.0 — Added PDF export, admin dashboard, SSE, leader reconciliation.
- *   v1.2.0 — Added registration open/close toggle, Settings collection.
- *   v1.3.0 — Added configurable max group members (1–20).
- *   v1.4.0 — Added clean PDF/CSV exports.
- *   v1.5.0 — Added M-Pesa paste-and-verify and payment tracking.
+ *   v1.0.0 — Initial release.
+ *   v1.1.0 — PDF export, admin dashboard, SSE, leader reconciliation.
+ *   v1.2.0 — Registration open/close toggle, Settings collection.
+ *   v1.3.0 — Configurable max group members.
+ *   v1.4.0 — Clean PDF/CSV exports.
+ *   v1.5.0 — M-Pesa paste-and-verify and payment tracking.
  *   v2.0.0 — Removed ALL payment features. Rebranded to
- *             "ITB9301 - INTERNET COMPUTING". Settings now expose only
- *             registration_open and max_group_members.
- *
- *  ARCHITECTURE NOTES
- *  ------------------
- *   Single-file Express backend. No build step, no transpilation,
- *   no external state beyond MongoDB.
- *
- *   Data flow for public registration:
- *     1. Client posts { regNo, name, phone, groupName, deviceId,
- *                       deviceMetadata }.
- *     2. Server reads current settings (open/closed, max members).
- *     3. Server validates every field.
- *     4. Server finds or creates the group (case/whitespace normalized).
- *     5. Server performs an ATOMIC findOneAndUpdate on the group to
- *        increment memberCount only if below the current max.
- *     6. Server inserts the Member document. On failure, rolls back
- *        the capacity increment.
- *     7. If this was the first member, it becomes the Group Leader.
- *     8. Server broadcasts an SSE 'registration' event for the admin
- *        dashboard.
- *
- *  SECURITY LAYERS
- *  ---------------
- *   - Helmet, CORS, cookie-parser, rate limiters, CSRF (double-submit
- *     cookie), HTTP-only session cookies (AdminSession collection),
- *     scrypt password hashing, unique REG number + device fingerprint,
- *     optional HMAC-SHA256 IP hash, centralized error handler.
+ *             "ITB9301 - INTERNET COMPUTING".
+ *             Pre-provisioned numbered groups ("Group 1" … "Group N"),
+ *             admin-configurable total count and per-group capacity,
+ *             registration and login use a group dropdown (groupIndex).
+ *             Manual admin group CRUD removed.
  *
  * ============================================================================
  */
@@ -189,8 +166,11 @@ const CONFIG = Object.freeze({
   STORE_IP_HASH,
   ENFORCE_DEVICE_LOCK,
 
-  MAX_GROUP_MEMBERS_HARD_LIMIT: 20,
-  MAX_GROUP_MEMBERS_DEFAULT: 10,
+  MAX_GROUP_MEMBERS_HARD_LIMIT: 200,
+  MAX_GROUP_MEMBERS_DEFAULT: 50,
+
+  TOTAL_GROUPS_HARD_LIMIT: 200,
+  TOTAL_GROUPS_DEFAULT: 50,
 
   ADMIN_COOKIE: 'itb9301_admin_sid',
   MEMBER_COOKIE: 'itb9301_member_sid',
@@ -234,49 +214,6 @@ function formatBytes(bytes) {
   return `${n.toFixed(n < 10 && i > 0 ? 2 : 0)} ${units[i]}`;
 }
 
-function nowIso() { return new Date().toISOString(); }
-
-function pick(obj, keys) {
-  const out = {};
-  if (!obj || typeof obj !== 'object') return out;
-  for (const k of keys) {
-    if (Object.prototype.hasOwnProperty.call(obj, k)) out[k] = obj[k];
-  }
-  return out;
-}
-
-function omit(obj, keys) {
-  const out = {};
-  if (!obj || typeof obj !== 'object') return out;
-  const exclude = new Set(keys);
-  for (const k of Object.keys(obj)) {
-    if (!exclude.has(k)) out[k] = obj[k];
-  }
-  return out;
-}
-
-function safeJsonParse(text, fallback = null) {
-  try { return JSON.parse(text); }
-  catch (_) { return fallback; }
-}
-
-function normalizeGroupName(raw) {
-  if (raw == null) return '';
-  return String(raw)
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-function displayGroupName(raw) {
-  if (raw == null) return '';
-  return String(raw)
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function normalizeRegNo(raw) {
   if (raw == null) return '';
   return String(raw)
@@ -310,11 +247,6 @@ function isValidDeviceId(id) {
   return /^[A-Za-z0-9_\-:]+$/.test(t);
 }
 
-function isValidGroupName(raw) {
-  const n = normalizeGroupName(raw);
-  return Boolean(n) && n.length <= 80;
-}
-
 function isValidRegNo(raw) {
   const n = normalizeRegNo(raw);
   if (n.length < 3 || n.length > 40) return false;
@@ -325,10 +257,6 @@ function isValidName(raw) {
   const n = normalizeName(raw);
   if (n.length < 2 || n.length > 120) return false;
   return /^[\p{L}\p{M}0-9 .,'\-()]+$/u.test(n);
-}
-
-function isValidKenyanPhone(raw) {
-  return normalizePhone(raw) !== null;
 }
 
 function sanitizeDeviceMetadata(meta) {
@@ -506,7 +434,7 @@ async function disconnectDatabase() {
  * ========================================================================== */
 
 // ----------------------------------------------------------------------------
-// Group
+// Group — pre-provisioned "Group 1" … "Group N" (index is the authoritative key)
 // ----------------------------------------------------------------------------
 
 const GroupSchema = new mongoose.Schema(
@@ -524,6 +452,13 @@ const GroupSchema = new mongoose.Schema(
       index: true,
       trim: true,
       lowercase: true,
+    },
+    index: {
+      type: Number,
+      required: true,
+      unique: true,
+      index: true,
+      min: 1,
     },
     leader: {
       type: mongoose.Schema.Types.ObjectId,
@@ -543,12 +478,6 @@ const GroupSchema = new mongoose.Schema(
   { timestamps: true, versionKey: false }
 );
 
-GroupSchema.virtual('isFull').get(function () {
-  return this.memberCount >= CONFIG.MAX_GROUP_MEMBERS_DEFAULT;
-});
-GroupSchema.virtual('availableSlots').get(function () {
-  return Math.max(0, CONFIG.MAX_GROUP_MEMBERS_DEFAULT - this.memberCount);
-});
 GroupSchema.set('toJSON', { virtuals: true });
 GroupSchema.set('toObject', { virtuals: true });
 
@@ -730,7 +659,7 @@ const SettingsSchema = new mongoose.Schema(
 const Settings = mongoose.model('Settings', SettingsSchema);
 
 /* ============================================================================
- * SECTION 5 — SETTINGS & BUSINESS HELPERS
+ * SECTION 5 — SETTINGS & GROUP PROVISIONING
  * ========================================================================== */
 
 async function getSetting(key, defaultValue = null) {
@@ -761,6 +690,67 @@ async function getMaxGroupMembers() {
   const n = Number(v);
   if (!Number.isFinite(n)) return CONFIG.MAX_GROUP_MEMBERS_DEFAULT;
   return Math.max(1, Math.min(CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT, Math.floor(n)));
+}
+
+async function getTotalGroups() {
+  const v = await getSetting('total_groups', CONFIG.TOTAL_GROUPS_DEFAULT);
+  const n = Number(v);
+  if (!Number.isFinite(n)) return CONFIG.TOTAL_GROUPS_DEFAULT;
+  return Math.max(1, Math.min(CONFIG.TOTAL_GROUPS_HARD_LIMIT, Math.floor(n)));
+}
+
+/**
+ * Ensure Group 1..targetTotal exist in the DB.
+ * - Creates any missing groups.
+ * - If the DB has groups with `index > targetTotal` AND those groups
+ *   have members, throws AppError('GROUPS_HAVE_MEMBERS', 409).
+ * - Otherwise deletes the empty ones.
+ *
+ * @param {number} [targetTotal] defaults to the current setting.
+ * @returns {Promise<{ created: number, deleted: number }>}
+ */
+async function ensureGroupsExist(targetTotal) {
+  const total = targetTotal != null ? targetTotal : await getTotalGroups();
+  const existing = await Group.find().sort({ index: 1 }).lean();
+  const existingByIndex = new Map();
+  for (const g of existing) existingByIndex.set(g.index, g);
+
+  let created = 0;
+  for (let i = 1; i <= total; i++) {
+    if (!existingByIndex.has(i)) {
+      try {
+        await Group.create({
+          name: `Group ${i}`,
+          normalizedName: `group ${i}`,
+          index: i,
+          memberCount: 0,
+        });
+        created += 1;
+      } catch (err) {
+        // Race: another instance created it — that's fine.
+        if (!err || err.code !== 11000) throw err;
+      }
+    }
+  }
+
+  const toDelete = existing.filter((g) => g.index > total);
+  const withMembers = toDelete.filter((g) => (g.memberCount || 0) > 0);
+  if (withMembers.length > 0) {
+    throw new AppError(
+      `Cannot reduce total groups to ${total}. These groups still have members: ` +
+        withMembers.map((g) => g.name).join(', ') +
+        '. Remove their members first.',
+      'GROUPS_HAVE_MEMBERS',
+      409
+    );
+  }
+  let deleted = 0;
+  for (const g of toDelete) {
+    await Group.deleteOne({ _id: g._id });
+    deleted += 1;
+  }
+
+  return { created, deleted };
 }
 
 async function reconcileGroupLeader(groupId) {
@@ -808,6 +798,7 @@ function shapeGroup(group, extra = {}) {
     id: String(group._id),
     name: group.name,
     normalizedName: group.normalizedName,
+    index: group.index,
     memberCount: group.memberCount,
     capacity: extra.capacity != null ? extra.capacity : CONFIG.MAX_GROUP_MEMBERS_DEFAULT,
     leader: group.leader ? String(group.leader) : null,
@@ -828,6 +819,18 @@ function shapeMember(member) {
     groupId: String(member.group),
     createdAt: member.createdAt,
     updatedAt: member.updatedAt,
+  };
+}
+
+function publicGroupShape(g, capacity) {
+  const mc = g.memberCount || 0;
+  return {
+    id: String(g._id),
+    index: g.index,
+    name: g.name,
+    memberCount: mc,
+    capacity,
+    isFull: mc >= capacity,
   };
 }
 
@@ -1040,20 +1043,27 @@ app.get(
 );
 
 /**
- * Public: exposes registration + capacity configuration to the register page.
- * URL kept as /api/payment-config for frontend compatibility; returns only
- * registration_open and max_group_members now that payments are removed.
+ * Public config — used by the register page and the member-login page.
+ * Returns the whole map of active groups so the frontend can populate
+ * its group dropdown without a separate call.
  */
 app.get(
-  '/api/payment-config',
+  '/api/config',
   asyncHandler(async (req, res) => {
-    const [registrationOpen, maxGroupMembers] = await Promise.all([
+    const [registrationOpen, maxGroupMembers, totalGroups] = await Promise.all([
       isRegistrationOpen(),
       getMaxGroupMembers(),
+      getTotalGroups(),
     ]);
+
+    const allGroups = await Group.find().sort({ index: 1 }).lean();
+    const active = allGroups.filter((g) => g.index >= 1 && g.index <= totalGroups);
+
     return ok(res, {
       registrationOpen,
       maxGroupMembers,
+      totalGroups,
+      groups: active.map((g) => publicGroupShape(g, maxGroupMembers)),
     });
   })
 );
@@ -1065,20 +1075,18 @@ app.get(
  *   regNo          — required
  *   name           — required
  *   phone          — required
- *   groupName      — required
+ *   groupIndex     — required integer 1..totalGroups
  *   deviceId       — required
  *   deviceMetadata — required (object)
- *
- * Response 201 on success with member + group info.
- * Every error uses the standard { success: false, message, code } shape.
  */
 app.post(
   '/api/register',
   registerLimiter,
   asyncHandler(async (req, res) => {
-    const [registrationOpen, maxGroupMembers] = await Promise.all([
+    const [registrationOpen, maxGroupMembers, totalGroups] = await Promise.all([
       isRegistrationOpen(),
       getMaxGroupMembers(),
+      getTotalGroups(),
     ]);
 
     if (!registrationOpen) {
@@ -1094,10 +1102,9 @@ app.post(
     const regNo = normalizeRegNo(body.regNo);
     const name = normalizeName(body.name);
     const phoneRaw = body.phone;
-    const groupDisplay = displayGroupName(body.groupName);
-    const groupNorm = normalizeGroupName(body.groupName);
     const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
     const deviceMetadata = sanitizeDeviceMetadata(body.deviceMetadata);
+    const groupIndex = Number(body.groupIndex);
 
     if (!isValidRegNo(regNo)) return fail(res, 'Please provide a valid registration number.', 'INVALID_REQNO', 400);
     if (!isValidName(name)) return fail(res, 'Please provide a valid full name.', 'INVALID_NAME', 400);
@@ -1105,7 +1112,9 @@ app.post(
     const phone = normalizePhone(phoneRaw);
     if (!phone) return fail(res, 'Please provide a valid Kenyan phone number.', 'INVALID_PHONE', 400);
 
-    if (!isValidGroupName(groupNorm)) return fail(res, 'Please provide a valid group name.', 'INVALID_GROUP', 400);
+    if (!Number.isInteger(groupIndex) || groupIndex < 1 || groupIndex > totalGroups) {
+      return fail(res, 'Please choose a valid group from the list.', 'INVALID_GROUP', 400);
+    }
     if (!isValidDeviceId(deviceId)) return fail(res, 'Unable to identify this device. Please refresh and try again.', 'INVALID_DEVICE', 400);
 
     const existingReg = await Member.findOne({ regNo }).lean();
@@ -1132,31 +1141,12 @@ app.post(
       }
     }
 
-    let group = await Group.findOne({ normalizedName: groupNorm });
-    let isNewGroup = false;
-
+    const group = await Group.findOne({ index: groupIndex });
     if (!group) {
-      try {
-        group = await Group.create({
-          name: groupDisplay,
-          normalizedName: groupNorm,
-          memberCount: 0,
-        });
-        isNewGroup = true;
-        console.log(`[register] created group "${groupDisplay}"`);
-      } catch (err) {
-        if (err && err.code === 11000) {
-          group = await Group.findOne({ normalizedName: groupNorm });
-        } else {
-          throw err;
-        }
-      }
+      return fail(res, 'That group does not exist. Please refresh the page and try again.', 'INVALID_GROUP', 400);
     }
 
-    if (!group) {
-      return fail(res, 'We could not complete your registration. Please contact the Administrator.', 'GROUP_CREATE_FAILED', 500);
-    }
-
+    // Atomic capacity check.
     const incremented = await Group.findOneAndUpdate(
       { _id: group._id, memberCount: { $lt: maxGroupMembers } },
       { $inc: { memberCount: 1 } },
@@ -1164,10 +1154,10 @@ app.post(
     );
 
     if (!incremented) {
-      console.log(`[register] group full: ${group.normalizedName} (cap=${maxGroupMembers})`);
+      console.log(`[register] group full: index=${groupIndex} (cap=${maxGroupMembers})`);
       return fail(
         res,
-        `This group is already full. A group can have a maximum of ${maxGroupMembers} members. Please contact the Administrator or choose another group.`,
+        `This group is already full (maximum ${maxGroupMembers} members). Please choose a different group.`,
         'GROUP_FULL',
         409
       );
@@ -1205,7 +1195,7 @@ app.post(
     if (isLeader) {
       await Group.updateOne({ _id: group._id, leader: null }, { $set: { leader: member._id } });
       await reconcileGroupLeader(group._id);
-      console.log(`[register] leader assigned: ${regNo} → ${group.normalizedName}`);
+      console.log(`[register] leader assigned: ${regNo} → Group ${groupIndex}`);
     }
 
     const freshCount = await recalcMemberCount(group._id);
@@ -1214,16 +1204,16 @@ app.post(
     sseBroadcast('registration', {
       member: shapeMember(member),
       group: shapeGroup(finalGroup, { capacity: maxGroupMembers }),
-      isNewGroup,
+      isNewGroup: false,
       isLeader,
     });
 
     console.log(
-      `[register] success regNo=${regNo} group=${group.normalizedName} leader=${isLeader}`
+      `[register] success regNo=${regNo} groupIndex=${groupIndex} leader=${isLeader}`
     );
 
     const message = isLeader
-      ? 'You are the first member to register for this group. You have been assigned as the Group Leader.'
+      ? 'You are the first member to register in this group. You have been assigned as the Group Leader.'
       : 'Registration successful.';
 
     return ok(
@@ -1231,7 +1221,6 @@ app.post(
       {
         message,
         isLeader,
-        isNewGroup,
         member: shapeMember(member),
         group: shapeGroup(finalGroup, { capacity: maxGroupMembers, memberCount: freshCount }),
       },
@@ -1248,21 +1237,24 @@ app.post(
   '/api/member/login',
   loginLimiter,
   asyncHandler(async (req, res) => {
-    const groupNorm = normalizeGroupName(req.body.groupName);
+    const groupIndex = Number(req.body.groupIndex);
     const regNo = normalizeRegNo(req.body.regNo);
 
-    if (!groupNorm || !regNo) {
-      return fail(res, 'Group name and registration number are required.', 'VALIDATION', 400);
+    if (!Number.isInteger(groupIndex) || groupIndex < 1) {
+      return fail(res, 'Please select your group.', 'VALIDATION', 400);
+    }
+    if (!regNo) {
+      return fail(res, 'Registration number is required.', 'VALIDATION', 400);
     }
 
-    const group = await Group.findOne({ normalizedName: groupNorm });
+    const group = await Group.findOne({ index: groupIndex });
     if (!group) {
-      return fail(res, 'Invalid group name or registration number.', 'INVALID_CREDENTIALS', 401);
+      return fail(res, 'Invalid group or registration number.', 'INVALID_CREDENTIALS', 401);
     }
 
     const member = await Member.findOne({ regNo, group: group._id });
     if (!member) {
-      return fail(res, 'Invalid group name or registration number.', 'INVALID_CREDENTIALS', 401);
+      return fail(res, 'Invalid group or registration number.', 'INVALID_CREDENTIALS', 401);
     }
 
     const token = crypto.randomBytes(48).toString('hex');
@@ -1277,7 +1269,7 @@ app.post(
 
     res.cookie(CONFIG.MEMBER_COOKIE, token, cookieOpts(CONFIG.MEMBER_SESSION_TTL_MS));
 
-    console.log(`[member-login] ${regNo} → ${group.normalizedName}`);
+    console.log(`[member-login] ${regNo} → Group ${groupIndex}`);
 
     const maxGroupMembers = await getMaxGroupMembers();
 
@@ -1364,10 +1356,6 @@ app.get(
  * SECTION 10 — ADMIN ROUTES
  * ========================================================================== */
 
-// ----------------------------------------------------------------------------
-// Admin login
-// ----------------------------------------------------------------------------
-
 app.post(
   '/api/admin/login',
   loginLimiter,
@@ -1423,10 +1411,6 @@ app.post(
   })
 );
 
-// ----------------------------------------------------------------------------
-// Admin logout
-// ----------------------------------------------------------------------------
-
 app.post(
   '/api/admin/logout',
   asyncHandler(async (req, res) => {
@@ -1437,19 +1421,11 @@ app.post(
   })
 );
 
-// ----------------------------------------------------------------------------
-// Admin session check
-// ----------------------------------------------------------------------------
-
 app.get(
   '/api/admin/me',
   requireAdmin,
   asyncHandler(async (req, res) => ok(res, { authenticated: true }))
 );
-
-// ----------------------------------------------------------------------------
-// Registration toggle + status
-// ----------------------------------------------------------------------------
 
 app.get(
   '/api/admin/registration-status',
@@ -1479,21 +1455,24 @@ app.post(
 );
 
 // ----------------------------------------------------------------------------
-// Settings
+// Settings (registration open + capacity + total groups)
 // ----------------------------------------------------------------------------
 
 app.get(
   '/api/admin/settings',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const [registrationOpen, maxGroupMembers] = await Promise.all([
+    const [registrationOpen, maxGroupMembers, totalGroups] = await Promise.all([
       isRegistrationOpen(),
       getMaxGroupMembers(),
+      getTotalGroups(),
     ]);
     return ok(res, {
       registrationOpen,
       maxGroupMembers,
       maxGroupMembersHardLimit: CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT,
+      totalGroups,
+      totalGroupsHardLimit: CONFIG.TOTAL_GROUPS_HARD_LIMIT,
     });
   })
 );
@@ -1519,7 +1498,38 @@ app.post(
       }
     }
 
+    if (body.totalGroups !== undefined) {
+      const n = Number(body.totalGroups);
+      if (!Number.isFinite(n) || n < 1 || n > CONFIG.TOTAL_GROUPS_HARD_LIMIT) {
+        errors.push(`Total groups must be between 1 and ${CONFIG.TOTAL_GROUPS_HARD_LIMIT}.`);
+      } else {
+        updates.total_groups = Math.floor(n);
+      }
+    }
+
     if (errors.length) return fail(res, errors.join(' '), 'VALIDATION', 400);
+
+    // Pre-check: cannot shrink total_groups while higher-indexed groups
+    // still contain members. Fail before persisting anything.
+    if (updates.total_groups !== undefined) {
+      const currentTotal = await getTotalGroups();
+      if (updates.total_groups < currentTotal) {
+        const orphans = await Group.find({
+          index: { $gt: updates.total_groups },
+          memberCount: { $gt: 0 },
+        }).lean();
+        if (orphans.length > 0) {
+          return fail(
+            res,
+            `Cannot reduce total groups to ${updates.total_groups}. ` +
+              `These groups still have members: ${orphans.map((g) => g.name).join(', ')}. ` +
+              'Remove their members first.',
+            'GROUPS_HAVE_MEMBERS',
+            409
+          );
+        }
+      }
+    }
 
     const entries = Object.entries(updates);
     for (const [key, value] of entries) {
@@ -1528,14 +1538,32 @@ app.post(
 
     console.log(`[admin] settings updated: ${entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')}`);
 
+    // Provision / prune groups when total_groups changed.
+    let provisioning = null;
+    if (updates.total_groups !== undefined) {
+      try {
+        provisioning = await ensureGroupsExist(updates.total_groups);
+        console.log(
+          `[admin] groups provisioned: created=${provisioning.created} deleted=${provisioning.deleted}`
+        );
+      } catch (err) {
+        // Pre-check should have prevented this; log defensively.
+        console.error('[admin] ensureGroupsExist error after settings save:', err.message);
+      }
+    }
+
     if (updates.registration_open !== undefined) {
       sseBroadcast('registration-status', { open: updates.registration_open });
     }
+    if (updates.max_group_members !== undefined || updates.total_groups !== undefined) {
+      sseBroadcast('group-updated', {});
+    }
     sseBroadcast('settings-updated', { keys: entries.map(([k]) => k) });
 
-    const [registrationOpen, maxGroupMembers] = await Promise.all([
+    const [registrationOpen, maxGroupMembers, totalGroups] = await Promise.all([
       isRegistrationOpen(),
       getMaxGroupMembers(),
+      getTotalGroups(),
     ]);
 
     return ok(res, {
@@ -1543,6 +1571,9 @@ app.post(
       registrationOpen,
       maxGroupMembers,
       maxGroupMembersHardLimit: CONFIG.MAX_GROUP_MEMBERS_HARD_LIMIT,
+      totalGroups,
+      totalGroupsHardLimit: CONFIG.TOTAL_GROUPS_HARD_LIMIT,
+      provisioning,
     });
   })
 );
@@ -1555,14 +1586,15 @@ app.get(
   '/api/admin/dashboard',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const [totalMembers, totalGroups, totalLeaders, maxGroupMembers] = await Promise.all([
+    const [totalMembers, totalGroups, totalLeaders, maxGroupMembers, totalGroupsSetting] = await Promise.all([
       Member.countDocuments(),
       Group.countDocuments(),
       Member.countDocuments({ isLeader: true }),
       getMaxGroupMembers(),
+      getTotalGroups(),
     ]);
 
-    const groups = await Group.find().sort({ createdAt: 1 }).lean();
+    const groups = await Group.find().sort({ index: 1 }).lean();
     const leaders = await Member.find({ isLeader: true }).select('regNo name group').lean();
     const leaderByGroup = {};
     for (const l of leaders) leaderByGroup[String(l.group)] = { regNo: l.regNo, name: l.name };
@@ -1570,7 +1602,7 @@ app.get(
     const recent = await Member.find()
       .sort({ createdAt: -1 })
       .limit(10)
-      .populate('group', 'name')
+      .populate('group', 'name index')
       .lean();
 
     return ok(res, {
@@ -1580,6 +1612,7 @@ app.get(
         totalLeaders,
       },
       maxGroupMembers,
+      totalGroups: totalGroupsSetting,
       groups: groups.map((g) =>
         shapeGroup(g, {
           capacity: maxGroupMembers,
@@ -1595,6 +1628,7 @@ app.get(
         isLeader: Boolean(m.isLeader),
         role: m.isLeader ? 'GROUP LEADER' : 'MEMBER',
         groupName: m.group ? m.group.name : null,
+        groupIndex: m.group ? m.group.index : null,
         createdAt: m.createdAt,
       })),
     });
@@ -1602,7 +1636,7 @@ app.get(
 );
 
 // ----------------------------------------------------------------------------
-// Groups CRUD
+// Groups (read-only — groups are auto-provisioned via total_groups setting)
 // ----------------------------------------------------------------------------
 
 app.get(
@@ -1610,7 +1644,7 @@ app.get(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const [groups, leaders, maxGroupMembers] = await Promise.all([
-      Group.find().sort({ createdAt: 1 }).lean(),
+      Group.find().sort({ index: 1 }).lean(),
       Member.find({ isLeader: true }).select('regNo name group').lean(),
       getMaxGroupMembers(),
     ]);
@@ -1662,87 +1696,8 @@ app.get(
   })
 );
 
-app.post(
-  '/api/admin/groups',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    const display = displayGroupName(req.body.name);
-    const norm = normalizeGroupName(req.body.name);
-    if (!isValidGroupName(norm)) return fail(res, 'Please provide a valid group name.', 'INVALID_GROUP', 400);
-
-    const existing = await Group.findOne({ normalizedName: norm });
-    if (existing) return fail(res, 'A group with that name already exists.', 'DUPLICATE_GROUP', 409);
-
-    const group = await Group.create({ name: display, normalizedName: norm, memberCount: 0 });
-    const maxGroupMembers = await getMaxGroupMembers();
-
-    console.log(`[admin] created group "${group.name}"`);
-    sseBroadcast('group-created', { group: shapeGroup(group, { capacity: maxGroupMembers }) });
-
-    return ok(res, { message: 'Group created.', group: shapeGroup(group, { capacity: maxGroupMembers }) }, 201);
-  })
-);
-
-app.patch(
-  '/api/admin/groups/:id',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 'Invalid group ID.', 'INVALID_ID', 400);
-    const group = await Group.findById(req.params.id);
-    if (!group) return fail(res, 'Group not found.', 'NOT_FOUND', 404);
-
-    const display = displayGroupName(req.body.name);
-    const norm = normalizeGroupName(req.body.name);
-    if (!isValidGroupName(norm)) return fail(res, 'Please provide a valid group name.', 'INVALID_GROUP', 400);
-
-    const clash = await Group.findOne({ normalizedName: norm, _id: { $ne: group._id } });
-    if (clash) return fail(res, 'Another group already uses that name.', 'DUPLICATE_GROUP', 409);
-
-    const oldName = group.name;
-    group.name = display;
-    group.normalizedName = norm;
-    await group.save();
-
-    const maxGroupMembers = await getMaxGroupMembers();
-    console.log(`[admin] renamed group "${oldName}" → "${display}"`);
-    sseBroadcast('group-updated', { group: shapeGroup(group, { capacity: maxGroupMembers }) });
-
-    return ok(res, { message: 'Group renamed.', group: shapeGroup(group, { capacity: maxGroupMembers }) });
-  })
-);
-
-app.delete(
-  '/api/admin/groups/:id',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 'Invalid group ID.', 'INVALID_ID', 400);
-    const group = await Group.findById(req.params.id);
-    if (!group) return fail(res, 'Group not found.', 'NOT_FOUND', 404);
-
-    const memberCount = await Member.countDocuments({ group: group._id });
-    const confirm = String(req.query.confirm || '').toLowerCase() === 'true';
-
-    if (memberCount > 0 && !confirm) {
-      return fail(
-        res,
-        `This group contains ${memberCount} member(s). To delete the group and all of its members, resend with ?confirm=true.`,
-        'CONFIRM_REQUIRED',
-        409
-      );
-    }
-
-    await Member.deleteMany({ group: group._id });
-    await Group.deleteOne({ _id: group._id });
-
-    console.log(`[admin] deleted group "${group.name}" (members=${memberCount})`);
-    sseBroadcast('group-deleted', { groupId: String(group._id), name: group.name });
-
-    return ok(res, {
-      message: `Group and ${memberCount} member(s) deleted.`,
-      deletedMembers: memberCount,
-    });
-  })
-);
+// NOTE: POST / PATCH / DELETE group endpoints were intentionally removed.
+// Groups are auto-provisioned from the total_groups setting.
 
 // ----------------------------------------------------------------------------
 // Members CRUD (admin)
@@ -1919,13 +1874,12 @@ app.get(
   '/api/admin/export',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const members = await Member.find().populate('group', 'name normalizedName').lean();
+    const members = await Member.find().populate('group', 'name index').lean();
 
     members.sort((a, b) => {
-      const ga = (a.group && a.group.name ? a.group.name : '').toLowerCase();
-      const gb = (b.group && b.group.name ? b.group.name : '').toLowerCase();
-      if (ga < gb) return -1;
-      if (ga > gb) return 1;
+      const ia = a.group && Number.isFinite(a.group.index) ? a.group.index : 0;
+      const ib = b.group && Number.isFinite(b.group.index) ? b.group.index : 0;
+      if (ia !== ib) return ia - ib;
       return new Date(a.createdAt) - new Date(b.createdAt);
     });
 
@@ -2266,7 +2220,7 @@ function buildGroupsPdf({ groups, reportTitle, reportSubtitle, maxGroupMembers }
 
       if (groups.length === 0) {
         doc.fontSize(11).font('Helvetica-Oblique').fillColor(PDF_COLORS.textMuted);
-        doc.text('No groups have been registered yet.', contentLeft, y + 20, {
+        doc.text('No groups have been provisioned yet.', contentLeft, y + 20, {
           width: contentWidth, align: 'center',
         });
       } else {
@@ -2304,7 +2258,7 @@ app.get(
   requireAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const groups = await Group.find().lean();
+      const groups = await Group.find().sort({ index: 1 }).lean();
 
       const allLeaders = await Member.find({ isLeader: true }).select('regNo name group').lean();
       const leadersByGroup = {};
@@ -2312,14 +2266,12 @@ app.get(
         leadersByGroup[String(l.group)] = { regNo: l.regNo, name: l.name };
       }
 
-      groups.sort((a, b) =>
-        String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase())
-      );
-
       const maxGroupMembers = await getMaxGroupMembers();
+      const totalGroups = await getTotalGroups();
 
       const groupsWithMembers = [];
       for (const g of groups) {
+        if (g.index > totalGroups) continue;
         const members = await Member.find({ group: g._id })
           .sort({ isLeader: -1, createdAt: 1, _id: 1 })
           .select('regNo name phone isLeader createdAt')
@@ -2328,6 +2280,7 @@ app.get(
         groupsWithMembers.push({
           id: String(g._id),
           name: g.name,
+          index: g.index,
           memberCount: g.memberCount,
           capacity: maxGroupMembers,
           leaderName: leader ? leader.name : null,
@@ -2389,6 +2342,7 @@ app.get(
           {
             id: String(group._id),
             name: group.name,
+            index: group.index,
             memberCount: group.memberCount,
             capacity: maxGroupMembers,
             leaderName: leader ? leader.name : null,
@@ -2409,7 +2363,7 @@ app.get(
 
       const safeName = group.name.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'group';
       const filename = `itb9301-group-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
-      console.log(`[member] PDF export generated for group "${group.name}" (${formatBytes(pdfBuffer.length)})`);
+      console.log(`[member] PDF export generated for "${group.name}" (${formatBytes(pdfBuffer.length)})`);
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -2506,6 +2460,7 @@ app.use((err, req, res, next) => {
     if (keys.regNo) return fail(res, 'This registration number already exists.', 'DUPLICATE_REGNO', 409);
     if (keys.deviceId) return fail(res, 'This device has already been used.', 'DEVICE_USED', 409);
     if (keys.normalizedName) return fail(res, 'A group with that name already exists.', 'DUPLICATE_GROUP', 409);
+    if (keys.index) return fail(res, 'A group with that index already exists.', 'DUPLICATE_GROUP_INDEX', 409);
     return fail(res, 'Duplicate value.', 'DUPLICATE', 409);
   }
 
@@ -2531,6 +2486,20 @@ let httpServer = null;
 async function start() {
   try {
     await connectDatabase();
+
+    // Provision Group 1..N (idempotent). Log a warning if the DB has
+    // higher-indexed groups with members — that's an admin-decision state
+    // the server cannot resolve on its own.
+    try {
+      const res = await ensureGroupsExist();
+      if (res.created || res.deleted) {
+        console.log(`[boot] groups provisioned: created=${res.created} deleted=${res.deleted}`);
+      } else {
+        console.log('[boot] groups provisioned: no changes');
+      }
+    } catch (err) {
+      console.warn('[boot] ensureGroupsExist warning:', err.message);
+    }
 
     httpServer = http.createServer(app);
 
