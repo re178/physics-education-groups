@@ -9,6 +9,38 @@
 <title>ITB9301 - INTERNET COMPUTING — Member</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%90%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/style.css" />
+<style>
+  /* Safety net for [hidden] on all elements. */
+  [hidden] { display: none !important; }
+
+  /* Login group select — matches the register page for consistency. */
+  #loginGroupName {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 1rem;
+    color: #1f2937;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='%236b7280' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 10px;
+    cursor: pointer;
+  }
+  #loginGroupName:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  }
+  #loginGroupName:disabled {
+    background-color: #f1f5f9;
+    cursor: not-allowed;
+    color: #6b7280;
+  }
+</style>
 </head>
 <body class="page page-member">
 
@@ -40,31 +72,23 @@
     <div class="hero hero-compact">
       <h1 id="login-title">Member Login</h1>
       <p class="hero-sub">
-        Log in with your <strong>Group Name</strong> as the username and
-        your <strong>Registration Number</strong> as the password.
+        Log in by selecting your <strong>Group</strong> from the list and
+        entering your <strong>Registration Number</strong> as the password.
       </p>
     </div>
 
     <section class="card card-narrow" aria-labelledby="login-form-title">
       <div class="card-head">
         <h2 id="login-form-title">Sign in</h2>
-        <p class="muted">Group name is case-insensitive.</p>
+        <p class="muted">Pick the same group you registered into.</p>
       </div>
 
       <form id="member-login-form" class="form" novalidate autocomplete="on">
         <div class="field">
-          <label for="loginGroupName">Group Name <span class="req" aria-hidden="true">*</span></label>
-          <input
-            id="loginGroupName"
-            name="groupName"
-            type="text"
-            autocomplete="username"
-            autocapitalize="words"
-            spellcheck="false"
-            maxlength="80"
-            placeholder="e.g. Internet Computing Group A"
-            required
-          />
+          <label for="loginGroupName">Choose Your Group <span class="req" aria-hidden="true">*</span></label>
+          <select id="loginGroupName" name="groupIndex" required disabled>
+            <option value="">Loading groups…</option>
+          </select>
           <p class="field-error" data-error-for="loginGroupName" hidden></p>
         </div>
 
@@ -102,9 +126,8 @@
         </div>
 
         <p class="muted small">
-          Trouble logging in? Confirm your Group Name matches exactly what
-          was used during registration (spaces and capitalization are
-          ignored) and that your Registration Number is correct.
+          Trouble logging in? Confirm you selected the same group you
+          registered into, and that your Registration Number is correct.
         </p>
       </form>
     </section>
@@ -136,7 +159,7 @@
       <div class="stat">
         <span class="stat-label">Members</span>
         <span class="stat-value" id="dash-member-count">0</span>
-        <span class="stat-sub">of <span id="dash-capacity">10</span></span>
+        <span class="stat-sub">of <span id="dash-capacity">50</span></span>
       </div>
       <div class="stat">
         <span class="stat-label">Your Role</span>
@@ -150,7 +173,7 @@
         <div class="capacity-bar" aria-hidden="true">
           <div class="capacity-fill" id="dash-capacity-fill" style="width:0%"></div>
         </div>
-        <p class="muted small" id="dash-capacity-text">0 / 10 members</p>
+        <p class="muted small" id="dash-capacity-text">0 / 50 members</p>
       </div>
     </section>
 
